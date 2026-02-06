@@ -179,6 +179,10 @@ class TypeDesc:
 
         Returns a zero-sized or minimal array/dataframe that has the right
         structure (dims, columns, dtype) but no actual data.
+
+        Note: For kind='dataframe' and 'series', this returns pandas objects
+        by default. Use make_polars_dataframe_sample/make_polars_series_sample
+        from the polars adapter for Polars objects.
         """
         if self.kind == "ndarray":
             from typetrace.adapters.xarray import make_xarray_sample
@@ -192,6 +196,10 @@ class TypeDesc:
             from typetrace.adapters.pandas import make_series_sample
 
             return make_series_sample(self)
+        elif self.kind == "columnar":
+            from typetrace.adapters.arrow import make_arrow_table_sample
+
+            return make_arrow_table_sample(self)
         elif self.kind == "drjit":
             from typetrace.adapters.drjit import make_drjit_sample
 

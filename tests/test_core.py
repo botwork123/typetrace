@@ -300,12 +300,17 @@ class TestTypeDescMakeSample:
 
         assert type(result) == llvm.Float64
 
-    def test_make_sample_not_implemented(self) -> None:
-        """make_sample raises NotImplementedError for unsupported kinds."""
-        t = TypeDesc(kind="columnar", columns=["a"])
+    @pytest.mark.skipif(find_spec("pyarrow") is None, reason="pyarrow not installed")
+    def test_make_sample_columnar(self) -> None:
+        """make_sample works for columnar kind (Arrow tables)."""
+        import pyarrow as pa
 
-        with pytest.raises(NotImplementedError, match="make_sample not implemented"):
-            t.make_sample()
+        t = TypeDesc(kind="columnar", columns=["a", "b"], dtypes={"a": "int64", "b": "float64"})
+        result = t.make_sample()
+
+        assert isinstance(result, pa.Table)
+        assert result.column_names == ["a", "b"]
+        assert result.num_rows == 0
 
     def test_make_sample_class_not_implemented(self) -> None:
         """make_sample raises NotImplementedError for class kind."""

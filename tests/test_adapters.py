@@ -317,6 +317,63 @@ class TestPolarsAdapter:
         with pytest.raises(TypeError, match="Expected Polars type"):
             from_polars([1, 2, 3])
 
+    @pytest.mark.parametrize(
+        "columns,dtypes,expected_dtypes",
+        [
+            (["a", "b"], {"a": "Float64", "b": "Int64"}, ["Float64", "Int64"]),
+            (["x"], {"x": "Boolean"}, ["Boolean"]),
+            (["c", "d"], {}, ["Float64", "Float64"]),  # Default dtype
+        ],
+    )
+    def test_make_polars_dataframe_sample(
+        self, columns: list, dtypes: dict, expected_dtypes: list
+    ) -> None:
+        """make_polars_dataframe_sample creates empty DataFrame with schema."""
+        import polars as pl
+        from typetrace.adapters.polars import make_polars_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="dataframe", columns=columns, dtypes=dtypes)
+        result = make_polars_dataframe_sample(t)
+
+        assert isinstance(result, pl.DataFrame)
+        assert result.columns == columns
+        assert len(result) == 0
+        for col, expected in zip(columns, expected_dtypes):
+            assert str(result[col].dtype) == expected
+
+    def test_make_polars_dataframe_sample_no_columns(self) -> None:
+        """make_polars_dataframe_sample raises ValueError without columns."""
+        from typetrace.adapters.polars import make_polars_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="dataframe")
+        with pytest.raises(ValueError, match="Cannot make Polars DataFrame sample"):
+            make_polars_dataframe_sample(t)
+
+    @pytest.mark.parametrize(
+        "dtype,expected_dtypes",
+        [
+            ("Float64", ["Float64"]),
+            ("Int32", ["Int32"]),
+            ("Boolean", ["Boolean"]),
+            ("Utf8", ["Utf8", "String"]),  # Polars renamed Utf8 -> String
+            (None, ["Float64"]),  # Default dtype
+        ],
+    )
+    def test_make_polars_series_sample(self, dtype: str | None, expected_dtypes: list) -> None:
+        """make_polars_series_sample creates empty Series with dtype."""
+        import polars as pl
+        from typetrace.adapters.polars import make_polars_series_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="series", dtype=dtype)
+        result = make_polars_series_sample(t)
+
+        assert isinstance(result, pl.Series)
+        assert len(result) == 0
+        assert str(result.dtype) in expected_dtypes
+
 
 @pyarrow_required
 class TestArrowAdapter:
@@ -352,6 +409,80 @@ class TestArrowAdapter:
 
         with pytest.raises(TypeError, match="Expected Arrow type"):
             from_arrow([1, 2, 3])
+
+    @pytest.mark.parametrize(
+        "columns,dtypes,expected_types",
+        [
+            (["a", "b"], {"a": "float64", "b": "int64"}, ["double", "int64"]),
+            (["x"], {"x": "bool"}, ["bool"]),
+            (["c", "d"], {}, ["double", "double"]),  # Default dtype
+            (["s"], {"s": "string"}, ["string"]),
+        ],
+    )
+    def test_make_arrow_table_sample(
+        self, columns: list, dtypes: dict, expected_types: list
+    ) -> None:
+        """make_arrow_table_sample creates empty Table with schema."""
+        import pyarrow as pa
+        from typetrace.adapters.arrow import make_arrow_table_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="columnar", columns=columns, dtypes=dtypes)
+        result = make_arrow_table_sample(t)
+
+        assert isinstance(result, pa.Table)
+        assert result.column_names == columns
+        assert result.num_rows == 0
+        for col, expected in zip(columns, expected_types):
+            assert str(result.schema.field(col).type) == expected
+
+    def test_make_arrow_table_sample_no_columns(self) -> None:
+        """make_arrow_table_sample raises ValueError without columns."""
+        from typetrace.adapters.arrow import make_arrow_table_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="columnar")
+        with pytest.raises(ValueError, match="Cannot make Arrow Table sample"):
+            make_arrow_table_sample(t)
+
+    @pytest.mark.parametrize(
+        "dtype,expected_type",
+        [
+            ("float64", "double"),
+            ("int32", "int32"),
+            ("bool", "bool"),
+            ("string", "string"),
+            (None, "double"),  # Default dtype
+        ],
+    )
+    def test_make_arrow_array_sample(self, dtype: str | None, expected_type: str) -> None:
+        """make_arrow_array_sample creates empty Array with type."""
+        import pyarrow as pa
+        from typetrace.adapters.arrow import make_arrow_array_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="series", dtype=dtype)
+        result = make_arrow_array_sample(t)
+
+        assert isinstance(result, pa.Array)
+        assert len(result) == 0
+        assert str(result.type) == expected_type
+
+    def test_make_sample_columnar_via_core(self) -> None:
+        """TypeDesc.make_sample() works for columnar kind."""
+        import pyarrow as pa
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(
+            kind="columnar",
+            columns=["x", "y"],
+            dtypes={"x": "int64", "y": "float64"},
+        )
+        result = t.make_sample()
+
+        assert isinstance(result, pa.Table)
+        assert result.column_names == ["x", "y"]
+        assert result.num_rows == 0
 
 
 @drjit_required
