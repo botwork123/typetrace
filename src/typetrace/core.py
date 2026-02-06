@@ -10,7 +10,7 @@ TypeDesc is the universal type descriptor that can represent:
 - drjit (DrJit arrays/tensors)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 
@@ -153,6 +153,9 @@ class TypeDesc:
             return from_arrow(value)
         else:
             # Fallback: treat as opaque class
+            # Skip primitives that don't need introspection
+            if isinstance(value, (int, float, str, bool, bytes, type(None))):
+                return cls(kind="class", fields=None)
             return cls._from_object(value)
 
     @classmethod

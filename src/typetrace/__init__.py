@@ -7,9 +7,9 @@ Core concepts:
 - infer: Run function on samples to discover output type
 """
 
-from typetrace.core import TypeDesc, Symbol, Dims
-from typetrace.inference import infer_types, TypeContext
-from typetrace.patterns import unify, broadcast, add_dim, reduce_dim
+from typetrace.core import Dims, Symbol, TypeDesc
+from typetrace.inference import TypeContext, infer_types
+from typetrace.patterns import add_dim, broadcast, reduce_dim, unify
 
 __all__ = [
     "TypeDesc",

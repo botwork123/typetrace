@@ -6,7 +6,7 @@ Handles DrJit arrays and tensors.
 
 from typing import Any
 
-from typetrace.core import TypeDesc, Symbol
+from typetrace.core import TypeDesc
 
 
 def from_drjit(value: Any) -> TypeDesc:
@@ -41,14 +41,15 @@ def _drjit_dtype(value: Any) -> str:
         return "float64"
     elif "Float32" in type_name or "Float" in type_name:
         return "float32"
-    elif "Int64" in type_name:
-        return "int64"
-    elif "Int32" in type_name or "Int" in type_name:
-        return "int32"
+    # UInt checks must come before Int checks (UInt64 contains Int64)
     elif "UInt64" in type_name:
         return "uint64"
     elif "UInt32" in type_name or "UInt" in type_name:
         return "uint32"
+    elif "Int64" in type_name:
+        return "int64"
+    elif "Int32" in type_name or "Int" in type_name:
+        return "int32"
     elif "Bool" in type_name:
         return "bool"
     else:

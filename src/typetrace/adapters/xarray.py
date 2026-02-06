@@ -6,7 +6,7 @@ Handles xarray DataArray and Dataset types.
 
 from typing import Any
 
-from typetrace.core import TypeDesc, Symbol
+from typetrace.core import Symbol, TypeDesc
 
 
 def from_xarray(value: Any) -> TypeDesc:
@@ -19,8 +19,8 @@ def from_xarray(value: Any) -> TypeDesc:
     Returns:
         TypeDesc with dims and dtype
     """
-    import xarray as xr
     import numpy as np
+    import xarray as xr
 
     if isinstance(value, xr.DataArray):
         dims = {name: size for name, size in zip(value.dims, value.shape)}
@@ -46,8 +46,8 @@ def make_xarray_sample(type_desc: TypeDesc) -> Any:
     Returns:
         xarray.DataArray with correct structure
     """
-    import xarray as xr
     import numpy as np
+    import xarray as xr
 
     if type_desc.dims is None:
         raise ValueError("Cannot make xarray sample without dims")

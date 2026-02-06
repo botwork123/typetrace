@@ -109,9 +109,7 @@ def infer_types(
         upstream = ()
 
     # Recursively infer upstream types
-    input_types = tuple(
-        infer_types(up, context, get_transform, get_upstream) for up in upstream
-    )
+    input_types = tuple(infer_types(up, context, get_transform, get_upstream) for up in upstream)
 
     # Get type transformer
     if get_transform is not None:

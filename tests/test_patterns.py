@@ -1,16 +1,15 @@
 """Tests for typetrace.patterns module."""
 
 import pytest
-
 from typetrace.core import Symbol
 from typetrace.patterns import (
     DimMismatch,
-    unify,
-    broadcast,
     add_dim,
-    reduce_dim,
-    promote_dtype,
     bind_symbols,
+    broadcast,
+    promote_dtype,
+    reduce_dim,
+    unify,
 )
 
 

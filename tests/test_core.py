@@ -1,8 +1,37 @@
 """Tests for typetrace.core module."""
 
-import pytest
+# Skip markers for optional dependencies
+from importlib.util import find_spec
 
-from typetrace.core import TypeDesc, Symbol
+import pytest
+from typetrace.core import Symbol, TypeDesc
+
+
+def skip_if_no_pandas():
+    return find_spec("pandas") is None
+
+
+def skip_if_no_xarray():
+    return find_spec("xarray") is None
+
+
+def skip_if_no_polars():
+    return find_spec("polars") is None
+
+
+def skip_if_no_pyarrow():
+    return find_spec("pyarrow") is None
+
+
+def skip_if_no_drjit():
+    return find_spec("drjit") is None
+
+
+pandas_required = pytest.mark.skipif(skip_if_no_pandas(), reason="pandas not installed")
+xarray_required = pytest.mark.skipif(skip_if_no_xarray(), reason="xarray not installed")
+polars_required = pytest.mark.skipif(skip_if_no_polars(), reason="polars not installed")
+pyarrow_required = pytest.mark.skipif(skip_if_no_pyarrow(), reason="pyarrow not installed")
+drjit_required = pytest.mark.skipif(skip_if_no_drjit(), reason="drjit not installed")
 
 
 class TestSymbol:
@@ -44,9 +73,7 @@ class TestTypeDesc:
             ("series", None, "int64"),
         ],
     )
-    def test_typedesc_creation(
-        self, kind: str, dims: dict | None, dtype: str | None
-    ) -> None:
+    def test_typedesc_creation(self, kind: str, dims: dict | None, dtype: str | None) -> None:
         """TypeDesc can be created with various configurations."""
         t = TypeDesc(kind=kind, dims=dims, dtype=dtype)
         assert t.kind == kind
@@ -97,3 +124,192 @@ class TestTypeDesc:
         t = TypeDesc(kind="ndarray", dims={"x": 10})
         with pytest.raises(Exception):  # FrozenInstanceError
             t.dims = {"y": 20}  # type: ignore
+
+
+class TestTypeDescFromValue:
+    """Tests for TypeDesc.from_value class method."""
+
+    @xarray_required
+    def test_from_value_xarray_dataarray(self) -> None:
+        """from_value dispatches to xarray adapter for DataArray."""
+        import numpy as np
+        import xarray as xr
+
+        da = xr.DataArray(np.zeros((5, 10)), dims=["x", "y"])
+        result = TypeDesc.from_value(da)
+
+        assert result.kind == "ndarray"
+        assert result.dims == {"x": 5, "y": 10}
+        assert result.dtype == "float64"
+
+    @pandas_required
+    def test_from_value_pandas_dataframe(self) -> None:
+        """from_value dispatches to pandas adapter for DataFrame."""
+        import pandas as pd
+
+        df = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+        result = TypeDesc.from_value(df)
+
+        assert result.kind == "dataframe"
+        assert result.columns == ["a", "b"]
+
+    @pandas_required
+    def test_from_value_pandas_series(self) -> None:
+        """from_value dispatches to pandas adapter for Series."""
+        import pandas as pd
+
+        s = pd.Series([1.0, 2.0, 3.0])
+        result = TypeDesc.from_value(s)
+
+        assert result.kind == "series"
+        assert result.dtype == "float64"
+
+    @polars_required
+    def test_from_value_polars_dataframe(self) -> None:
+        """from_value dispatches to polars adapter for DataFrame."""
+        import polars as pl
+
+        df = pl.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+        result = TypeDesc.from_value(df)
+
+        assert result.kind == "dataframe"
+        assert result.columns == ["a", "b"]
+
+    @pyarrow_required
+    def test_from_value_arrow_table(self) -> None:
+        """from_value dispatches to arrow adapter for Table."""
+        import pyarrow as pa
+
+        table = pa.table({"a": [1, 2], "b": [3.0, 4.0]})
+        result = TypeDesc.from_value(table)
+
+        assert result.kind == "columnar"
+        assert result.columns == ["a", "b"]
+
+    @drjit_required
+    def test_from_value_drjit_array(self) -> None:
+        """from_value dispatches to drjit adapter."""
+        from drjit import llvm
+
+        arr = llvm.Float64([1.0, 2.0, 3.0])
+        result = TypeDesc.from_value(arr)
+
+        assert result.kind == "drjit"
+        assert result.dtype == "float64"
+
+    def test_from_value_opaque_object(self) -> None:
+        """from_value falls back to _from_object for unknown types."""
+
+        class CustomClass:
+            def __init__(self):
+                self.value = 42
+                self.name = "test"
+
+        obj = CustomClass()
+        result = TypeDesc.from_value(obj)
+
+        assert result.kind == "class"
+        assert result.fields is not None
+        assert "value" in result.fields
+        assert "name" in result.fields
+
+    def test_from_value_opaque_object_no_public_attrs(self) -> None:
+        """from_value handles objects with no public non-callable attrs."""
+
+        class EmptyClass:
+            def __init__(self):
+                self._private = 123
+
+            def method(self):
+                pass
+
+        obj = EmptyClass()
+        result = TypeDesc.from_value(obj)
+
+        assert result.kind == "class"
+        assert result.fields is None
+
+    def test_from_value_opaque_object_with_property_error(self) -> None:
+        """from_value handles objects with properties that raise errors."""
+
+        class ProblematicClass:
+            def __init__(self):
+                self.good_attr = 1
+
+            @property
+            def bad_attr(self):
+                raise RuntimeError("Cannot access this!")
+
+        obj = ProblematicClass()
+        result = TypeDesc.from_value(obj)
+
+        assert result.kind == "class"
+        # Should have good_attr but not bad_attr
+        assert result.fields is not None
+        assert "good_attr" in result.fields
+
+
+class TestTypeDescMakeSample:
+    """Tests for TypeDesc.make_sample method."""
+
+    @xarray_required
+    def test_make_sample_ndarray(self) -> None:
+        """make_sample creates xarray DataArray for ndarray kind."""
+        import xarray as xr
+
+        t = TypeDesc(kind="ndarray", dims={"x": 10, "y": 20}, dtype="float32")
+        result = t.make_sample()
+
+        assert isinstance(result, xr.DataArray)
+        assert set(result.dims) == {"x", "y"}
+        assert result.dtype == "float32"
+
+    @pandas_required
+    def test_make_sample_dataframe(self) -> None:
+        """make_sample creates pandas DataFrame for dataframe kind."""
+        import pandas as pd
+
+        t = TypeDesc(
+            kind="dataframe",
+            columns=["a", "b"],
+            dtypes={"a": "float64", "b": "int32"},
+        )
+        result = t.make_sample()
+
+        assert isinstance(result, pd.DataFrame)
+        assert list(result.columns) == ["a", "b"]
+
+    @pandas_required
+    def test_make_sample_series(self) -> None:
+        """make_sample creates pandas Series for series kind."""
+        import pandas as pd
+
+        t = TypeDesc(kind="series", dtype="int64")
+        result = t.make_sample()
+
+        assert isinstance(result, pd.Series)
+        assert result.dtype == "int64"
+
+    @drjit_required
+    def test_make_sample_drjit(self) -> None:
+        """make_sample creates DrJit array for drjit kind."""
+        from drjit import llvm
+
+        t = TypeDesc(kind="drjit", drjit_type=llvm.Float64, dtype="float64")
+        result = t.make_sample()
+
+        assert type(result) == llvm.Float64
+
+    def test_make_sample_not_implemented(self) -> None:
+        """make_sample raises NotImplementedError for unsupported kinds."""
+        t = TypeDesc(kind="columnar", columns=["a"])
+
+        with pytest.raises(NotImplementedError, match="make_sample not implemented"):
+            t.make_sample()
+
+    def test_make_sample_class_not_implemented(self) -> None:
+        """make_sample raises NotImplementedError for class kind."""
+        t = TypeDesc(kind="class", fields={"x": TypeDesc(kind="ndarray", dims={"a": 1})})
+
+        with pytest.raises(NotImplementedError, match="make_sample not implemented"):
+            t.make_sample()

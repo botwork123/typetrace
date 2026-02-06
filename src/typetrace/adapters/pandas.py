@@ -29,8 +29,10 @@ def from_pandas(value: Any) -> TypeDesc:
         index = None
         if value.index.name is not None or isinstance(value.index, pd.MultiIndex):
             if isinstance(value.index, pd.MultiIndex):
-                index = {name: len(value.index.get_level_values(i))
-                        for i, name in enumerate(value.index.names)}
+                index = {
+                    name: len(value.index.get_level_values(i))
+                    for i, name in enumerate(value.index.names)
+                }
             else:
                 index = {value.index.name or "index": len(value.index)}
 
@@ -66,7 +68,6 @@ def make_dataframe_sample(type_desc: TypeDesc) -> Any:
         pandas.DataFrame with correct structure
     """
     import pandas as pd
-    import numpy as np
 
     if type_desc.columns is None:
         raise ValueError("Cannot make DataFrame sample without columns")
