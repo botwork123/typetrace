@@ -6,7 +6,7 @@ output types using type_transform methods.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypeVar
+from typing import Any, Callable, Protocol
 
 from typetrace.core import TypeDesc
 from typetrace.patterns import bind_symbols
@@ -26,9 +26,6 @@ class HasUpstream(Protocol):
     def upstream(self) -> tuple[Any, ...]:
         """Return upstream dependencies."""
         ...
-
-
-T = TypeVar("T", bound=HasUpstream)
 
 
 @dataclass
@@ -71,10 +68,10 @@ class TypeContext:
 
 
 def infer_types(
-    node: T,
+    node: Any,
     context: TypeContext,
-    get_transform: Callable[[T], HasTypeTransform] | None = None,
-    get_upstream: Callable[[T], tuple[T, ...]] | None = None,
+    get_transform: Callable[[Any], HasTypeTransform] | None = None,
+    get_upstream: Callable[[Any], tuple[Any, ...]] | None = None,
 ) -> TypeDesc:
     """
     Infer output type for a node by walking its dependencies.

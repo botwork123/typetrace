@@ -153,7 +153,7 @@ def bind_symbols(d: Dims | None, bindings: dict[str, int]) -> Dims:
     if d is None:
         return {}
 
-    result = {}
+    result: Dims = {}
     for name, size in d.items():
         if isinstance(size, Symbol) and size.name in bindings:
             result[name] = bindings[size.name]

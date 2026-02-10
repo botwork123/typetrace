@@ -298,7 +298,7 @@ class TestTypeDescMakeSample:
         t = TypeDesc(kind="drjit", drjit_type=llvm.Float64, dtype="float64")
         result = t.make_sample()
 
-        assert type(result) == llvm.Float64
+        assert type(result) is llvm.Float64
 
     @pytest.mark.skipif(find_spec("pyarrow") is None, reason="pyarrow not installed")
     def test_make_sample_columnar(self) -> None:

@@ -6,7 +6,7 @@ Handles pandas DataFrame and Series types.
 
 from typing import Any
 
-from typetrace.core import TypeDesc
+from typetrace.core import Dims, TypeDesc
 
 
 def from_pandas(value: Any) -> TypeDesc:
@@ -26,11 +26,11 @@ def from_pandas(value: Any) -> TypeDesc:
         dtypes = {col: str(dtype) for col, dtype in value.dtypes.items()}
 
         # Handle index
-        index = None
+        index: Dims | None = None
         if value.index.name is not None or isinstance(value.index, pd.MultiIndex):
             if isinstance(value.index, pd.MultiIndex):
                 index = {
-                    name: len(value.index.get_level_values(i))
+                    str(name or f"level_{i}"): len(value.index.get_level_values(i))
                     for i, name in enumerate(value.index.names)
                 }
             else:

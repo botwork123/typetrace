@@ -6,7 +6,7 @@ Handles xarray DataArray and Dataset types.
 
 from typing import Any
 
-from typetrace.core import Symbol, TypeDesc
+from typetrace.core import Dims, Symbol, TypeDesc
 
 
 def from_xarray(value: Any) -> TypeDesc:
@@ -23,7 +23,7 @@ def from_xarray(value: Any) -> TypeDesc:
     import xarray as xr
 
     if isinstance(value, xr.DataArray):
-        dims = {name: size for name, size in zip(value.dims, value.shape)}
+        dims: Dims = {str(name): size for name, size in zip(value.dims, value.shape)}
         dtype = str(value.dtype) if value.dtype != np.dtype("O") else "object"
         return TypeDesc(kind="ndarray", dims=dims, dtype=dtype)
     elif isinstance(value, xr.Dataset):

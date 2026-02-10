@@ -499,7 +499,7 @@ class TestDrJitAdapter:
 
         assert result.kind == "drjit"
         assert result.dtype == "float64"
-        assert result.drjit_type == type(arr)
+        assert result.drjit_type is type(arr)
 
     def test_from_drjit_int_array(self) -> None:
         """from_drjit extracts TypeDesc from int array."""
@@ -550,7 +550,7 @@ class TestDrJitAdapter:
         t = TypeDesc(kind="drjit", drjit_type=llvm.Float64, dtype="float64")
         result = make_drjit_sample(t)
 
-        assert type(result) == llvm.Float64
+        assert type(result) is llvm.Float64
         assert dr.width(result) == 0
 
     def test_make_drjit_sample_infer_type(self) -> None:
@@ -562,4 +562,4 @@ class TestDrJitAdapter:
         t = TypeDesc(kind="drjit", dtype="int64")
         result = make_drjit_sample(t)
 
-        assert type(result) == llvm.Int64
+        assert type(result) is llvm.Int64

@@ -17,6 +17,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy src/typetrace
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: pytest
         name: pytest
         entry: pytest tests/ -v --tb=short
@@ -25,8 +32,8 @@ repos:
         always_run: true
 
       - id: coverage
-        name: coverage check (95% minimum)
-        entry: bash -c 'pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/ || echo "Coverage check - may fail until tests exist"'
+        name: coverage check (93% minimum)
+        entry: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=93 tests/
         language: system
         pass_filenames: false
         always_run: true
