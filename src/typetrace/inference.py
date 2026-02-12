@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, cast
 
 from typetrace.core import TypeDesc
+from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
+from typetrace.layout_ops import check_handoff_compatibility
 from typetrace.patterns import bind_symbols
 
 
@@ -142,6 +144,8 @@ def infer_types(
 def infer_by_execution(
     fn: Callable,
     *input_types: TypeDesc,
+    expected_output_traits: ExecutionTraits | None = None,
+    allow_device_copy: bool = False,
     **kwargs: Any,
 ) -> TypeDesc:
     """
@@ -153,16 +157,33 @@ def infer_by_execution(
     Args:
         fn: Function to execute
         *input_types: TypeDescs for inputs
+        expected_output_traits: Optional runtime execution contract
+        allow_device_copy: Allow explicit cross-device transfer at handoff
         **kwargs: Additional keyword arguments for fn
 
     Returns:
         TypeDesc extracted from function's output
     """
-    # Create sample data for each input
-    samples = [t.make_sample() for t in input_types]
-
-    # Execute function
+    samples = [type_desc.make_sample() for type_desc in input_types]
     result = fn(*samples, **kwargs)
-
-    # Extract type from result
+    _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
     return TypeDesc.from_value(result)
+
+
+def _validate_execution_handoff(
+    result: Any,
+    expected_output_traits: ExecutionTraits | None,
+    allow_device_copy: bool,
+) -> None:
+    if expected_output_traits is None:
+        return
+    observed = infer_execution_traits(result)
+    compatibility = check_handoff_compatibility(
+        observed,
+        expected_output_traits,
+        allow_device_copy=allow_device_copy,
+    )
+    if compatibility.compatible:
+        return
+    reasons = "; ".join(compatibility.reasons)
+    raise ValueError(f"Execution traits handoff check failed: {reasons}")

@@ -8,7 +8,16 @@ Core concepts:
 """
 
 from typetrace.core import Dims, Symbol, TypeDesc
+from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
 from typetrace.inference import TypeContext, infer_types
+from typetrace.layout_ops import (
+    check_handoff_compatibility,
+    concat_traits,
+    normalize_handoff_traits,
+    reshape_restack_traits,
+    slice_view_traits,
+    transpose_traits,
+)
 from typetrace.patterns import add_dim, broadcast, reduce_dim, unify
 
 __all__ = [
@@ -17,6 +26,14 @@ __all__ = [
     "Dims",
     "infer_types",
     "TypeContext",
+    "ExecutionTraits",
+    "infer_execution_traits",
+    "check_handoff_compatibility",
+    "slice_view_traits",
+    "transpose_traits",
+    "reshape_restack_traits",
+    "concat_traits",
+    "normalize_handoff_traits",
     "unify",
     "broadcast",
     "add_dim",
