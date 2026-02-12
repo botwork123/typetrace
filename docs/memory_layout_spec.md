@@ -45,8 +45,9 @@ Checks with explicit failure reasons:
 - contiguity expectations
 - device policy (`cpu`/`cuda`)
 
-When `allow_device_copy=True`, cross-device handoff is marked as
-`requires_copy=True` with an explicit transfer reason.
+When `allow_device_copy=True`, cross-device handoff can still be
+`compatible=True` while being marked `requires_copy=True` with an explicit
+transfer reason.
 
 ## Transition helpers
 
@@ -54,7 +55,7 @@ Implemented in `typetrace.layout_ops`:
 
 - `slice_view_traits` → strided view traits
 - `transpose_traits` → reordered shape + strided traits
-- `reshape_restack_traits` → target shape + copy-required flag
+- `reshape_restack_traits` → target shape + conservative copy-required heuristic
 - `concat_traits` → validated homogeneous concat output traits
 - `normalize_handoff_traits` → explicit contiguous C materialized traits
 

@@ -62,7 +62,7 @@ def test_execution_traits_validation_errors(kwargs: dict, error: str) -> None:
             ExecutionTraits("float32", (2, 3), "cpu", "C", True, False),
             False,
             (
-                False,
+                True,
                 True,
                 (
                     "layout order mismatch: source=strided, target=C",
@@ -80,7 +80,7 @@ def test_execution_traits_validation_errors(kwargs: dict, error: str) -> None:
             ExecutionTraits("float32", (2, 3), "cpu", "C", True, False),
             ExecutionTraits("float32", (2, 3), "cuda", "C", True, False),
             True,
-            (False, True, ("device transfer required: cpu->cuda",)),
+            (True, True, ("device transfer required: cpu->cuda",)),
         ),
     ],
 )
@@ -95,31 +95,71 @@ def test_handoff_compatibility(
 
 
 @pytest.mark.parametrize(
-    "operation,expected_shape,expected_layout,expected_copy",
+    "operation,source,new_shape,order,axes,expected_shape,expected_layout,expected_copy",
     [
-        ("slice", (4, 5), "strided", None),
-        ("transpose", (5, 4), "strided", None),
-        ("reshape", (2, 10), "C", False),
+        (
+            "slice",
+            ExecutionTraits("float32", (4, 5), "cpu", "C", True, False),
+            None,
+            None,
+            None,
+            (4, 5),
+            "strided",
+            None,
+        ),
+        (
+            "transpose",
+            ExecutionTraits("float32", (4, 5), "cpu", "C", True, False),
+            None,
+            None,
+            (1, 0),
+            (5, 4),
+            "strided",
+            None,
+        ),
+        (
+            "reshape",
+            ExecutionTraits("float32", (4, 5), "cpu", "C", True, False),
+            (2, 10),
+            "C",
+            None,
+            (2, 10),
+            "C",
+            False,
+        ),
+        (
+            "reshape",
+            ExecutionTraits("float32", (4, 5), "cpu", "strided", False, False),
+            (2, 10),
+            "C",
+            None,
+            (2, 10),
+            "C",
+            True,
+        ),
     ],
 )
 def test_layout_transition_utilities(
     operation: str,
+    source: ExecutionTraits,
+    new_shape: tuple[int, ...] | None,
+    order: str | None,
+    axes: tuple[int, ...] | None,
     expected_shape: tuple[int, ...],
     expected_layout: str,
     expected_copy: bool | None,
 ) -> None:
-    source = ExecutionTraits("float32", (4, 5), "cpu", "C", True, False)
     if operation == "slice":
         result = slice_view_traits(source)
         assert result.shape == expected_shape
         assert result.layout_order == expected_layout
         return
     if operation == "transpose":
-        result = transpose_traits(source, (1, 0))
+        result = transpose_traits(source, axes or ())
         assert result.shape == expected_shape
         assert result.layout_order == expected_layout
         return
-    result, needs_copy = reshape_restack_traits(source, expected_shape, "C")
+    result, needs_copy = reshape_restack_traits(source, new_shape or (), order or "C")
     assert result.shape == expected_shape
     assert result.layout_order == expected_layout
     assert needs_copy == expected_copy
@@ -130,6 +170,7 @@ def test_layout_transition_utilities(
     [
         (((2, 3), (4, 3)), 0, (6, 3)),
         (((2, 3), (2, 7)), 1, (2, 10)),
+        (((2, 3), (2, 7)), -1, (2, 10)),
     ],
 )
 def test_concat_and_handoff_normalization(
@@ -169,8 +210,20 @@ def test_infer_by_execution_enforces_traits(case: str) -> None:
         infer_by_execution(identity, input_type, expected_output_traits=bad_target)
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
-def test_cpu_gpu_policy_for_infer_by_execution(device: str) -> None:
+@pytest.mark.parametrize(
+    "device,allow_device_copy,expected_dims,error",
+    [
+        ("cpu", False, {"x": 4}, None),
+        ("cuda", False, None, "device mismatch not allowed"),
+        ("cuda", True, {"x": 4}, None),
+    ],
+)
+def test_cpu_gpu_policy_for_infer_by_execution(
+    device: str,
+    allow_device_copy: bool,
+    expected_dims: dict[str, int] | None,
+    error: str | None,
+) -> None:
     pytest.importorskip("xarray")
 
     def identity(arr):
@@ -178,12 +231,22 @@ def test_cpu_gpu_policy_for_infer_by_execution(device: str) -> None:
 
     input_type = TypeDesc(kind="ndarray", dims={"x": 4}, dtype="float64")
     target = ExecutionTraits("float64", (4,), device, "C", True, False)
-    if device == "cpu":
-        result = infer_by_execution(identity, input_type, expected_output_traits=target)
-        assert result.dims == {"x": 4}
+    if error is not None:
+        with pytest.raises(ValueError, match=error):
+            infer_by_execution(
+                identity,
+                input_type,
+                expected_output_traits=target,
+                allow_device_copy=allow_device_copy,
+            )
         return
-    with pytest.raises(ValueError, match="device mismatch not allowed"):
-        infer_by_execution(identity, input_type, expected_output_traits=target)
+    result = infer_by_execution(
+        identity,
+        input_type,
+        expected_output_traits=target,
+        allow_device_copy=allow_device_copy,
+    )
+    assert result.dims == expected_dims
 
 
 @pytest.mark.parametrize("stride_slice", [(slice(None), slice(None, None, 2))])
@@ -306,13 +369,23 @@ def test_handoff_rank_shape_errors(
 
 
 @pytest.mark.parametrize(
+    "axes,error",
+    [
+        ((0,), "length"),
+        ((0, 0), "permutation"),
+        ((0, 2), "out of bounds"),
+    ],
+)
+def test_transpose_traits_validation_errors(axes: tuple[int, ...], error: str) -> None:
+    source = ExecutionTraits("float32", (2, 3), "cpu", "C", True, False)
+    with pytest.raises(ValueError, match=error):
+        transpose_traits(source, axes)
+
+
+@pytest.mark.parametrize(
     "source,axis,expected_reason",
     [
-        (
-            (),
-            0,
-            "requires at least one source",
-        ),
+        ((), 0, "requires at least one source"),
         (
             (
                 ExecutionTraits("float32", (2, 2), "cpu", "C", True, False),
@@ -328,6 +401,30 @@ def test_handoff_rank_shape_errors(
             ),
             0,
             "device mismatch",
+        ),
+        (
+            (
+                ExecutionTraits("float32", (2, 2), "cpu", "C", True, False),
+                ExecutionTraits("float32", (2, 2), "cpu", "C", True, False),
+            ),
+            2,
+            "out of bounds",
+        ),
+        (
+            (
+                ExecutionTraits("float32", (2, 2), "cpu", "C", True, False),
+                ExecutionTraits("float32", (2, 2, 1), "cpu", "C", True, False),
+            ),
+            0,
+            "rank mismatch",
+        ),
+        (
+            (
+                ExecutionTraits("float32", (2, 2), "cpu", "C", True, False),
+                ExecutionTraits("float32", (2, 3), "cpu", "C", True, False),
+            ),
+            0,
+            "non-axis dimension mismatch",
         ),
     ],
 )

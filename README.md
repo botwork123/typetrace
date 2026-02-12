@@ -105,6 +105,22 @@ context = TypeContext(bindings={'N': 1000})
 output_type = infer_types(root_node, context)
 ```
 
+## Development checks
+
+```bash
+# Local parity with configured hooks (lint, format, type, tests, coverage)
+pre-commit run --all-files
+
+# CI-style explicit commands (same scope as workflows)
+ruff check .
+ruff format --check .
+mypy src/typetrace
+pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
+```
+
+`pre-commit` is the recommended single command locally; direct commands are
+kept for explicit CI parity and targeted debugging.
+
 ## License
 
 MIT

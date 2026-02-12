@@ -158,7 +158,7 @@ def infer_by_execution(
         fn: Function to execute
         *input_types: TypeDescs for inputs
         expected_output_traits: Optional runtime execution contract
-        allow_device_copy: Allow explicit cross-device transfer at handoff
+        allow_device_copy: Allow cross-device handoff if transfer copy is required
         **kwargs: Additional keyword arguments for fn
 
     Returns:
