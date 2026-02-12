@@ -251,6 +251,44 @@ class TestInferTypes:
         result = infer_types(node, ctx)
         assert result == expected
 
+    def test_infer_node_without_upstream_interface(self) -> None:
+        """infer_types treats nodes without upstream accessors as source nodes."""
+
+        class LeafNode:
+            def type_transform(self) -> TypeDesc:
+                return TypeDesc(kind="ndarray", dims={"z": 9}, dtype="float64")
+
+        result = infer_types(LeafNode(), TypeContext())
+
+        assert result == TypeDesc(kind="ndarray", dims={"z": 9}, dtype="float64")
+
+    @pytest.mark.parametrize("cycle_kind", ["self", "two_node"])
+    def test_infer_detects_cycles(self, cycle_kind: str) -> None:
+        """infer_types raises ValueError when upstream graph contains a cycle."""
+
+        @dataclass
+        class CyclicNode:
+            deps: list["CyclicNode"]
+
+            def upstream(self) -> tuple["CyclicNode", ...]:
+                return tuple(self.deps)
+
+            def type_transform(self, *inputs: TypeDesc) -> TypeDesc:
+                return TypeDesc(kind="ndarray", dims={"x": 1}, dtype="float64")
+
+        if cycle_kind == "self":
+            node = CyclicNode(deps=[])
+            node.deps.append(node)
+            target = node
+        else:
+            left = CyclicNode(deps=[])
+            right = CyclicNode(deps=[left])
+            left.deps.append(right)
+            target = left
+
+        with pytest.raises(ValueError, match="Cycle detected"):
+            infer_types(target, TypeContext())
+
 
 class TestInferByExecution:
     """Tests for infer_by_execution function."""

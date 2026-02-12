@@ -32,8 +32,8 @@ repos:
         always_run: true
 
       - id: coverage
-        name: coverage check (93% minimum)
-        entry: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=93 tests/
+        name: coverage check (95% minimum)
+        entry: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
         language: system
         pass_filenames: false
         always_run: true

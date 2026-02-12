@@ -25,10 +25,9 @@ def from_arrow(value: Any) -> TypeDesc:
         columns = value.column_names
         dtypes = {name: str(value.schema.field(name).type) for name in columns}
         return TypeDesc(kind="columnar", columns=columns, dtypes=dtypes)
-    elif isinstance(value, pa.Array):
+    if isinstance(value, pa.Array):
         return TypeDesc(kind="series", dtype=str(value.type))
-    else:
-        raise TypeError(f"Expected Arrow type, got {type(value)}")
+    raise TypeError(f"Expected Arrow type, got {type(value)}")
 
 
 def _get_arrow_type(dtype_str: str) -> Any:
@@ -36,33 +35,24 @@ def _get_arrow_type(dtype_str: str) -> Any:
     import pyarrow as pa
 
     dtype_lower = dtype_str.lower()
-
-    if "float64" in dtype_lower or "double" in dtype_lower:
-        return pa.float64()
-    elif "float32" in dtype_lower or dtype_lower == "float":
-        return pa.float32()
-    elif "int64" in dtype_lower:
-        return pa.int64()
-    elif "int32" in dtype_lower:
-        return pa.int32()
-    elif "int16" in dtype_lower:
-        return pa.int16()
-    elif "int8" in dtype_lower:
-        return pa.int8()
-    elif "uint64" in dtype_lower:
-        return pa.uint64()
-    elif "uint32" in dtype_lower:
-        return pa.uint32()
-    elif "uint16" in dtype_lower:
-        return pa.uint16()
-    elif "uint8" in dtype_lower:
-        return pa.uint8()
-    elif "bool" in dtype_lower:
-        return pa.bool_()
-    elif "string" in dtype_lower or "utf8" in dtype_lower:
-        return pa.string()
-    else:
-        return pa.float64()  # Default
+    mapping: list[tuple[tuple[str, ...], Any]] = [
+        (("float64", "double"), pa.float64()),
+        (("float32",), pa.float32()),
+        (("uint64",), pa.uint64()),
+        (("uint32",), pa.uint32()),
+        (("uint16",), pa.uint16()),
+        (("uint8",), pa.uint8()),
+        (("int64",), pa.int64()),
+        (("int32",), pa.int32()),
+        (("int16",), pa.int16()),
+        (("int8",), pa.int8()),
+        (("bool",), pa.bool_()),
+        (("string", "utf8"), pa.string()),
+    ]
+    for tokens, arrow_type in mapping:
+        if any(token in dtype_lower for token in tokens):
+            return arrow_type
+    return pa.float64()
 
 
 def make_arrow_table_sample(type_desc: TypeDesc) -> Any:

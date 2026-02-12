@@ -11,7 +11,7 @@ TypeDesc is the universal type descriptor that can represent:
 """
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 
 @dataclass(frozen=True)
@@ -128,50 +128,47 @@ class TypeDesc:
 
         Dispatches to appropriate adapter based on value type.
         """
-        # Lazy imports to avoid hard dependencies
-        type_name = type(value).__module__ + "." + type(value).__name__
+        module_root = type(value).__module__.split(".", 1)[0]
+        dispatch = cls._dispatch_table()
+        if module_root in dispatch:
+            return dispatch[module_root](value)
+        if isinstance(value, (int, float, str, bool, bytes, type(None))):
+            return cls(kind="class", fields=None)
+        return cls._from_object(value)
 
-        if "xarray" in type_name:
-            from typetrace.adapters.xarray import from_xarray
+    @staticmethod
+    def _dispatch_table() -> dict[str, Callable[[Any], "TypeDesc"]]:
+        """Build adapter dispatch table lazily to avoid hard dependencies."""
 
-            return from_xarray(value)
-        elif "pandas" in type_name:
-            from typetrace.adapters.pandas import from_pandas
+        from typetrace.adapters.arrow import from_arrow
+        from typetrace.adapters.drjit import from_drjit
+        from typetrace.adapters.pandas import from_pandas
+        from typetrace.adapters.polars import from_polars
+        from typetrace.adapters.xarray import from_xarray
 
-            return from_pandas(value)
-        elif "drjit" in type_name:
-            from typetrace.adapters.drjit import from_drjit
-
-            return from_drjit(value)
-        elif "polars" in type_name:
-            from typetrace.adapters.polars import from_polars
-
-            return from_polars(value)
-        elif "pyarrow" in type_name:
-            from typetrace.adapters.arrow import from_arrow
-
-            return from_arrow(value)
-        else:
-            # Fallback: treat as opaque class
-            # Skip primitives that don't need introspection
-            if isinstance(value, (int, float, str, bool, bytes, type(None))):
-                return cls(kind="class", fields=None)
-            return cls._from_object(value)
+        return {
+            "xarray": from_xarray,
+            "pandas": from_pandas,
+            "drjit": from_drjit,
+            "polars": from_polars,
+            "pyarrow": from_arrow,
+        }
 
     @classmethod
     def _from_object(cls, value: Any) -> "TypeDesc":
         """Extract TypeDesc from arbitrary Python object."""
-        # Introspect public attributes
-        fields = {}
+        fields: dict[str, TypeDesc] = {}
         for name in dir(value):
-            if not name.startswith("_"):
-                try:
-                    attr = getattr(value, name)
-                    if not callable(attr):
-                        fields[name] = cls.from_value(attr)
-                except Exception:
-                    pass
-        return cls(kind="class", fields=fields if fields else None)
+            if name.startswith("_"):
+                continue
+            try:
+                attr = getattr(value, name)
+            except (AttributeError, RuntimeError, ValueError):
+                continue
+            if callable(attr):
+                continue
+            fields[name] = cls.from_value(attr)
+        return cls(kind="class", fields=fields or None)
 
     def make_sample(self) -> Any:
         """

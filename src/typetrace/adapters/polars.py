@@ -44,45 +44,50 @@ def from_polars(value: Any) -> TypeDesc:
         columns = value.columns
         dtypes = {col: str(value[col].dtype) for col in columns}
         return TypeDesc(kind="dataframe", columns=columns, dtypes=dtypes)
-    elif isinstance(value, pl.Series):
+    if isinstance(value, pl.Series):
         return TypeDesc(kind="series", dtype=str(value.dtype))
-    else:
-        raise TypeError(f"Expected Polars type, got {type(value)}")
+    raise TypeError(f"Expected Polars type, got {type(value)}")
 
 
 def _get_polars_dtype(dtype_str: str) -> Any:
     """Convert dtype string to polars dtype."""
     import polars as pl
 
-    # Normalize common dtype names
     dtype_lower = dtype_str.lower()
+    mapping: list[tuple[tuple[str, ...], Any]] = [
+        (("float64",), pl.Float64),
+        (("float32",), pl.Float32),
+        (("uint64",), pl.UInt64),
+        (("uint32",), pl.UInt32),
+        (("uint16",), pl.UInt16),
+        (("uint8",), pl.UInt8),
+        (("int64",), pl.Int64),
+        (("int32",), pl.Int32),
+        (("int16",), pl.Int16),
+        (("int8",), pl.Int8),
+        (("bool",), pl.Boolean),
+        (("utf8", "string"), pl.Utf8),
+    ]
+    for tokens, polars_dtype in mapping:
+        if any(token in dtype_lower for token in tokens):
+            return polars_dtype
 
-    if "float64" in dtype_lower or dtype_str == "Float64":
-        return pl.Float64
-    elif "float32" in dtype_lower or dtype_str == "Float32":
-        return pl.Float32
-    elif "int64" in dtype_lower or dtype_str == "Int64":
-        return pl.Int64
-    elif "int32" in dtype_lower or dtype_str == "Int32":
-        return pl.Int32
-    elif "int16" in dtype_lower or dtype_str == "Int16":
-        return pl.Int16
-    elif "int8" in dtype_lower or dtype_str == "Int8":
-        return pl.Int8
-    elif "uint64" in dtype_lower or dtype_str == "UInt64":
-        return pl.UInt64
-    elif "uint32" in dtype_lower or dtype_str == "UInt32":
-        return pl.UInt32
-    elif "uint16" in dtype_lower or dtype_str == "UInt16":
-        return pl.UInt16
-    elif "uint8" in dtype_lower or dtype_str == "UInt8":
-        return pl.UInt8
-    elif "bool" in dtype_lower or dtype_str == "Boolean":
-        return pl.Boolean
-    elif "utf8" in dtype_lower or "string" in dtype_lower or dtype_str in ("Utf8", "String"):
-        return pl.Utf8
-    else:
-        return pl.Float64  # Default
+    named_map = {
+        "Float64": pl.Float64,
+        "Float32": pl.Float32,
+        "UInt64": pl.UInt64,
+        "UInt32": pl.UInt32,
+        "UInt16": pl.UInt16,
+        "UInt8": pl.UInt8,
+        "Int64": pl.Int64,
+        "Int32": pl.Int32,
+        "Int16": pl.Int16,
+        "Int8": pl.Int8,
+        "Boolean": pl.Boolean,
+        "Utf8": pl.Utf8,
+        "String": pl.Utf8,
+    }
+    return named_map.get(dtype_str, pl.Float64)
 
 
 def make_polars_dataframe_sample(type_desc: TypeDesc) -> Any:

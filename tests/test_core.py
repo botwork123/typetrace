@@ -229,8 +229,11 @@ class TestTypeDescFromValue:
         assert result.kind == "class"
         assert result.fields is None
 
-    def test_from_value_opaque_object_with_property_error(self) -> None:
-        """from_value handles objects with properties that raise errors."""
+    @pytest.mark.parametrize("error_cls", [AttributeError, RuntimeError, ValueError])
+    def test_from_value_opaque_object_with_property_error_types(
+        self, error_cls: type[Exception]
+    ) -> None:
+        """from_value skips attributes whose property getters raise known runtime errors."""
 
         class ProblematicClass:
             def __init__(self):
@@ -238,15 +241,29 @@ class TestTypeDescFromValue:
 
             @property
             def bad_attr(self):
-                raise RuntimeError("Cannot access this!")
+                raise error_cls("Cannot access this!")
 
-        obj = ProblematicClass()
-        result = TypeDesc.from_value(obj)
+        result = TypeDesc.from_value(ProblematicClass())
 
         assert result.kind == "class"
-        # Should have good_attr but not bad_attr
         assert result.fields is not None
-        assert "good_attr" in result.fields
+        assert sorted(result.fields.keys()) == ["good_attr"]
+
+    def test_from_value_module_substring_does_not_misdispatch(self) -> None:
+        """from_value does not dispatch adapters when module merely contains adapter name."""
+
+        class FakeXarrayLike:
+            __module__ = "notxarray.fake"
+
+            def __init__(self):
+                self.value = 7
+
+        result = TypeDesc.from_value(FakeXarrayLike())
+
+        assert result.kind == "class"
+        assert result.fields is not None
+        assert list(result.fields.keys()) == ["value"]
+        assert result.fields["value"] == TypeDesc(kind="class", fields=None)
 
 
 class TestTypeDescMakeSample:

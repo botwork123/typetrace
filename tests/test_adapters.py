@@ -374,6 +374,25 @@ class TestPolarsAdapter:
         assert len(result) == 0
         assert str(result.dtype) in expected_dtypes
 
+    @pytest.mark.parametrize(
+        "dtype,expected",
+        [
+            ("Float32", "Float32"),
+            ("Int16", "Int16"),
+            ("Int8", "Int8"),
+            ("UInt64", "UInt64"),
+            ("UInt32", "UInt32"),
+            ("UInt16", "UInt16"),
+            ("UInt8", "UInt8"),
+            ("unknown", "Float64"),
+        ],
+    )
+    def test_get_polars_dtype_additional_branches(self, dtype: str, expected: str) -> None:
+        """_get_polars_dtype maps integer/unsigned and fallback dtypes."""
+        from typetrace.adapters.polars import _get_polars_dtype
+
+        assert _get_polars_dtype(dtype).__name__ == expected
+
 
 @pyarrow_required
 class TestArrowAdapter:
@@ -467,6 +486,25 @@ class TestArrowAdapter:
         assert isinstance(result, pa.Array)
         assert len(result) == 0
         assert str(result.type) == expected_type
+
+    @pytest.mark.parametrize(
+        "dtype,expected",
+        [
+            ("float32", "float"),
+            ("int16", "int16"),
+            ("int8", "int8"),
+            ("uint64", "uint64"),
+            ("uint32", "uint32"),
+            ("uint16", "uint16"),
+            ("uint8", "uint8"),
+            ("mystery", "double"),
+        ],
+    )
+    def test_get_arrow_type_additional_branches(self, dtype: str, expected: str) -> None:
+        """_get_arrow_type maps additional integer/unsigned and fallback dtypes."""
+        from typetrace.adapters.arrow import _get_arrow_type
+
+        assert str(_get_arrow_type(dtype)) == expected
 
     def test_make_sample_columnar_via_core(self) -> None:
         """TypeDesc.make_sample() works for columnar kind."""

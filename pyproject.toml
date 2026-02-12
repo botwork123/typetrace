@@ -64,8 +64,7 @@ source = ["src/typetrace"]
 branch = true
 
 [tool.coverage.report]
-# Current measured baseline is ~93%; ratchet upward after targeted test additions.
-fail_under = 93
+fail_under = 95
 show_missing = true
 
 [tool.mypy]

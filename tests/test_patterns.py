@@ -64,6 +64,7 @@ class TestBroadcast:
             ({"x": 10}, {"x": 10}, {"x": 10}),  # Same dim, second wins
             ({}, {"x": 10}, {"x": 10}),
             (None, {"x": 10}, {"x": 10}),
+            ({"x": 10}, None, {"x": 10}),
             (None, None, {}),
         ],
     )
@@ -121,6 +122,7 @@ class TestPromoteDtype:
             (None, "float64", "float64"),
             ("float64", None, "float64"),
             (None, None, None),
+            ("complex64", "float32", "complex64"),
         ],
     )
     def test_promote_dtype(self, dt1, dt2, expected):

@@ -6,7 +6,7 @@ output types using type_transform methods.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, cast
 
 from typetrace.core import TypeDesc
 from typetrace.patterns import bind_symbols
@@ -67,11 +67,36 @@ class TypeContext:
         return type_desc.with_dims(resolved)
 
 
+def _get_upstream_nodes(
+    node: Any,
+    get_upstream: Callable[[Any], tuple[Any, ...]] | None,
+) -> tuple[Any, ...]:
+    """Resolve upstream nodes from custom accessor or node methods."""
+    if get_upstream is not None:
+        return get_upstream(node)
+    if hasattr(node, "upstream"):
+        return cast(tuple[Any, ...], node.upstream())
+    if hasattr(node, "upstream_nodes"):
+        return cast(tuple[Any, ...], node.upstream_nodes())
+    return ()
+
+
+def _get_transformer(
+    node: Any,
+    get_transform: Callable[[Any], HasTypeTransform] | None,
+) -> HasTypeTransform:
+    """Resolve a node transformer."""
+    if get_transform is not None:
+        return get_transform(node)
+    return cast(HasTypeTransform, node)
+
+
 def infer_types(
     node: Any,
     context: TypeContext,
     get_transform: Callable[[Any], HasTypeTransform] | None = None,
     get_upstream: Callable[[Any], tuple[Any, ...]] | None = None,
+    _visiting: set[int] | None = None,
 ) -> TypeDesc:
     """
     Infer output type for a node by walking its dependencies.
@@ -90,39 +115,28 @@ def infer_types(
     Returns:
         TypeDesc for the node's output
     """
-    # Check cache
     node_id = id(node)
     if node_id in context._cache:
         return context._cache[node_id]
 
-    # Get upstream nodes
-    if get_upstream is not None:
-        upstream = get_upstream(node)
-    elif hasattr(node, "upstream"):
-        upstream = node.upstream()
-    elif hasattr(node, "upstream_nodes"):
-        upstream = node.upstream_nodes()
-    else:
-        upstream = ()
+    visiting = _visiting if _visiting is not None else set()
+    if node_id in visiting:
+        raise ValueError(f"Cycle detected while inferring node {node!r}")
 
-    # Recursively infer upstream types
-    input_types = tuple(infer_types(up, context, get_transform, get_upstream) for up in upstream)
+    visiting.add(node_id)
+    try:
+        upstream = _get_upstream_nodes(node, get_upstream)
+        input_types = tuple(
+            infer_types(up, context, get_transform, get_upstream, visiting) for up in upstream
+        )
+        transformer = _get_transformer(node, get_transform)
+        output_type = transformer.type_transform(*input_types)
+        resolved = context.resolve_dims(output_type)
+    finally:
+        visiting.remove(node_id)
 
-    # Get type transformer
-    if get_transform is not None:
-        transformer = get_transform(node)
-    else:
-        transformer = node
-
-    # Compute output type
-    output_type = transformer.type_transform(*input_types)
-
-    # Resolve any symbolic dims that are now bound
-    output_type = context.resolve_dims(output_type)
-
-    # Cache and return
-    context._cache[node_id] = output_type
-    return output_type
+    context._cache[node_id] = resolved
+    return resolved
 
 
 def infer_by_execution(
