@@ -1,0 +1,1759 @@
+version: 1
+primitive_vocabulary:
+  - select_row
+  - select_col
+  - transpose
+  - flatten_c
+  - flatten_f
+  - reshape
+  - restack
+  - matmul
+  - add
+  - sub
+  - mul
+  - div
+  - sum
+  - mean
+  - var
+  - std
+  - cov
+  - corr
+  - solve
+  - inverse
+  - cholesky
+  - svd
+  - eig
+  - qr
+  - diag
+  - diff
+  - cumsum
+  - clip
+  - abs
+  - sqrt
+  - exp
+  - log
+  - max
+  - min
+  - dot
+recipes:
+  - id: row_select
+    category: matrix_ops
+    summary: Select row i from matrix X.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+      - name: i
+        shape: []
+        dtype: int64
+    preconditions:
+      - "m > 0"
+      - "0 <= i < m"
+    dag:
+      - op: select_row
+        inputs: [X, i]
+        output: r
+    expected_outputs:
+      - name: r
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "sum(r) == sum(X[i, :])"
+    oracle:
+      numpy: "X[i, :]"
+      scipy: null
+
+  - id: col_select
+    category: matrix_ops
+    summary: Select column j from matrix X.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+      - name: j
+        shape: []
+        dtype: int64
+    preconditions:
+      - "n > 0"
+      - "0 <= j < n"
+    dag:
+      - op: select_col
+        inputs: [X, j]
+        output: c
+    expected_outputs:
+      - name: c
+        shape: [m]
+        dtype: float64
+    invariants:
+      - "sum(c) == sum(X[:, j])"
+    oracle:
+      numpy: "X[:, j]"
+      scipy: null
+
+  - id: transpose_matrix
+    category: matrix_ops
+    summary: Transpose a matrix.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+    preconditions:
+      - "m > 0"
+      - "n > 0"
+    dag:
+      - op: transpose
+        inputs: [X]
+        output: XT
+    expected_outputs:
+      - name: XT
+        shape: [n, m]
+        dtype: float64
+    invariants:
+      - "transpose(XT) == X"
+    oracle:
+      numpy: "X.T"
+      scipy: null
+
+  - id: flatten_row_major
+    category: matrix_ops
+    summary: Flatten matrix in C order.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+    preconditions:
+      - "m > 0"
+      - "n > 0"
+    dag:
+      - op: flatten_c
+        inputs: [X]
+        output: v
+    expected_outputs:
+      - name: v
+        shape: [m*n]
+        dtype: float64
+    invariants:
+      - "v[0] == X[0, 0]"
+      - "v[n] == X[1, 0]"
+    oracle:
+      numpy: "X.reshape(-1, order='C')"
+      scipy: null
+
+  - id: flatten_col_major
+    category: matrix_ops
+    summary: Flatten matrix in Fortran order.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+    preconditions:
+      - "m > 0"
+      - "n > 0"
+    dag:
+      - op: flatten_f
+        inputs: [X]
+        output: v
+    expected_outputs:
+      - name: v
+        shape: [m*n]
+        dtype: float64
+    invariants:
+      - "v[0] == X[0, 0]"
+      - "v[m] == X[0, 1]"
+    oracle:
+      numpy: "X.reshape(-1, order='F')"
+      scipy: null
+
+  - id: reshape_vector_to_matrix
+    category: matrix_ops
+    summary: Reshape vector v into m by n matrix.
+    inputs:
+      - name: v
+        shape: [m*n]
+        dtype: float64
+    preconditions:
+      - "m > 0"
+      - "n > 0"
+    dag:
+      - op: reshape
+        inputs: [v]
+        params:
+          shape: [m, n]
+        output: X
+    expected_outputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+    invariants:
+      - "flatten_c(X) == v"
+    oracle:
+      numpy: "v.reshape(m, n)"
+      scipy: null
+
+  - id: restack_rows_to_columns
+    category: matrix_ops
+    summary: Restack rows into columns by transpose-reshape-transpose.
+    inputs:
+      - name: X
+        shape: [m, n]
+        dtype: float64
+    preconditions:
+      - "m > 0"
+      - "n > 0"
+    dag:
+      - op: transpose
+        inputs: [X]
+        output: XT
+      - op: reshape
+        inputs: [XT]
+        params:
+          shape: [n, m]
+        output: Y
+    expected_outputs:
+      - name: Y
+        shape: [n, m]
+        dtype: float64
+    invariants:
+      - "transpose(Y) == X"
+    oracle:
+      numpy: "X.T.reshape(n, m)"
+      scipy: null
+
+  - id: ols_normal_equations
+    category: fitting
+    summary: Ordinary least squares via normal equations.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: y
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "n >= p"
+      - "rank(X) == p"
+    dag:
+      - op: transpose
+        inputs: [X]
+        output: XT
+      - op: matmul
+        inputs: [XT, X]
+        output: gram
+      - op: matmul
+        inputs: [XT, y]
+        output: rhs
+      - op: solve
+        inputs: [gram, rhs]
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [p]
+        dtype: float64
+    invariants:
+      - "matmul(transpose(X), sub(matmul(X, beta), y)) == zeros([p])"
+    oracle:
+      numpy: "np.linalg.solve(X.T @ X, X.T @ y)"
+      scipy: "scipy.linalg.solve(X.T @ X, X.T @ y, assume_a='pos')"
+
+  - id: ols_qr_decomposition
+    category: fitting
+    summary: OLS using QR decomposition.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: y
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "n >= p"
+      - "rank(X) == p"
+    dag:
+      - op: qr
+        inputs: [X]
+        output: qr_pair
+      - op: select_col
+        inputs: [qr_pair, 0]
+        output: Q
+      - op: select_col
+        inputs: [qr_pair, 1]
+        output: R
+      - op: transpose
+        inputs: [Q]
+        output: QT
+      - op: matmul
+        inputs: [QT, y]
+        output: qty
+      - op: solve
+        inputs: [R, qty]
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [p]
+        dtype: float64
+    invariants:
+      - "matmul(X, beta) == matmul(Q, matmul(transpose(Q), y))"
+    oracle:
+      numpy: "np.linalg.solve(np.linalg.qr(X, mode='reduced')[1], np.linalg.qr(X, mode='reduced')[0].T @ y)"
+      scipy: "scipy.linalg.lstsq(X, y)[0]"
+
+  - id: weighted_least_squares
+    category: fitting
+    summary: Weighted least squares with diagonal weights.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: y
+        shape: [n]
+        dtype: float64
+      - name: w
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "n >= p"
+      - "all(w > 0)"
+      - "rank(X) == p"
+    dag:
+      - op: diag
+        inputs: [w]
+        output: W
+      - op: transpose
+        inputs: [X]
+        output: XT
+      - op: matmul
+        inputs: [XT, W]
+        output: XTW
+      - op: matmul
+        inputs: [XTW, X]
+        output: gram
+      - op: matmul
+        inputs: [XTW, y]
+        output: rhs
+      - op: solve
+        inputs: [gram, rhs]
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [p]
+        dtype: float64
+    invariants:
+      - "matmul(transpose(X), matmul(diag(w), sub(matmul(X, beta), y))) == zeros([p])"
+    oracle:
+      numpy: "np.linalg.solve(X.T @ np.diag(w) @ X, X.T @ np.diag(w) @ y)"
+      scipy: "scipy.linalg.solve(X.T @ np.diag(w) @ X, X.T @ np.diag(w) @ y, assume_a='pos')"
+
+  - id: ridge_regression_closed_form
+    category: fitting
+    summary: Ridge regression closed-form estimator.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: y
+        shape: [n]
+        dtype: float64
+      - name: lambda
+        shape: []
+        dtype: float64
+    preconditions:
+      - "n >= p"
+      - "lambda > 0"
+    dag:
+      - op: transpose
+        inputs: [X]
+        output: XT
+      - op: matmul
+        inputs: [XT, X]
+        output: gram
+      - op: add
+        inputs: [gram, lambda]
+        params:
+          broadcast: identity_p
+        output: reg_gram
+      - op: matmul
+        inputs: [XT, y]
+        output: rhs
+      - op: solve
+        inputs: [reg_gram, rhs]
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [p]
+        dtype: float64
+    invariants:
+      - "beta minimizes ||y - X beta||_2^2 + lambda ||beta||_2^2"
+    oracle:
+      numpy: "np.linalg.solve(X.T @ X + lambda_ * np.eye(X.shape[1]), X.T @ y)"
+      scipy: "scipy.linalg.solve(X.T @ X + lambda_ * np.eye(X.shape[1]), X.T @ y, assume_a='pos')"
+
+  - id: pca_svd_scores
+    category: fitting
+    summary: PCA scores from centered data using SVD.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: k
+        shape: []
+        dtype: int64
+    preconditions:
+      - "1 <= k <= min(n, p)"
+    dag:
+      - op: mean
+        inputs: [X]
+        params:
+          axis: 0
+        output: mu
+      - op: sub
+        inputs: [X, mu]
+        output: Xc
+      - op: svd
+        inputs: [Xc]
+        output: svd_triplet
+      - op: select_col
+        inputs: [svd_triplet, 0]
+        output: U
+      - op: select_col
+        inputs: [svd_triplet, 1]
+        output: S
+      - op: select_col
+        inputs: [U, k]
+        output: Uk
+      - op: select_row
+        inputs: [S, k]
+        output: Sk
+      - op: mul
+        inputs: [Uk, Sk]
+        output: scores
+    expected_outputs:
+      - name: scores
+        shape: [n, k]
+        dtype: float64
+    invariants:
+      - "mean(scores, axis=0) == zeros([k])"
+    oracle:
+      numpy: "U, S, _ = np.linalg.svd(X - X.mean(axis=0), full_matrices=False); U[:, :k] * S[:k]"
+      scipy: "scipy.linalg.svd(X - X.mean(axis=0), full_matrices=False)"
+
+  - id: covariance_matrix
+    category: statistics
+    summary: Sample covariance matrix of columns.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+    preconditions:
+      - "n >= 2"
+    dag:
+      - op: cov
+        inputs: [X]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+    expected_outputs:
+      - name: S
+        shape: [p, p]
+        dtype: float64
+    invariants:
+      - "transpose(S) == S"
+      - "diag(S) >= 0"
+    oracle:
+      numpy: "np.cov(X, rowvar=False, ddof=1)"
+      scipy: null
+
+  - id: correlation_matrix
+    category: statistics
+    summary: Correlation matrix of columns.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+    preconditions:
+      - "n >= 2"
+      - "std(X, axis=0) > 0"
+    dag:
+      - op: corr
+        inputs: [X]
+        params:
+          rowvar: false
+        output: R
+    expected_outputs:
+      - name: R
+        shape: [p, p]
+        dtype: float64
+    invariants:
+      - "diag(R) == ones([p])"
+      - "max(abs(R)) <= 1"
+    oracle:
+      numpy: "np.corrcoef(X, rowvar=False)"
+      scipy: null
+
+  - id: zscore_standardization
+    category: statistics
+    summary: Standardize each feature to zero mean and unit variance.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+    preconditions:
+      - "n >= 2"
+      - "std(X, axis=0) > 0"
+    dag:
+      - op: mean
+        inputs: [X]
+        params:
+          axis: 0
+        output: mu
+      - op: std
+        inputs: [X]
+        params:
+          axis: 0
+          ddof: 1
+        output: sigma
+      - op: sub
+        inputs: [X, mu]
+        output: X0
+      - op: div
+        inputs: [X0, sigma]
+        output: Z
+    expected_outputs:
+      - name: Z
+        shape: [n, p]
+        dtype: float64
+    invariants:
+      - "mean(Z, axis=0) == zeros([p])"
+      - "var(Z, axis=0, ddof=1) == ones([p])"
+    oracle:
+      numpy: "(X - X.mean(axis=0)) / X.std(axis=0, ddof=1)"
+      scipy: "scipy.stats.zscore(X, axis=0, ddof=1)"
+
+  - id: geometric_mean_vector
+    category: statistics
+    summary: Geometric mean per feature.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+    preconditions:
+      - "all(X > 0)"
+    dag:
+      - op: log
+        inputs: [X]
+        output: LX
+      - op: mean
+        inputs: [LX]
+        params:
+          axis: 0
+        output: m
+      - op: exp
+        inputs: [m]
+        output: g
+    expected_outputs:
+      - name: g
+        shape: [p]
+        dtype: float64
+    invariants:
+      - "g > 0"
+    oracle:
+      numpy: "np.exp(np.mean(np.log(X), axis=0))"
+      scipy: "scipy.stats.gmean(X, axis=0)"
+
+  - id: mahalanobis_distance_batch
+    category: statistics
+    summary: Mahalanobis distances to mean for each row.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+    preconditions:
+      - "n > p"
+      - "cov(X) is positive definite"
+    dag:
+      - op: mean
+        inputs: [X]
+        params:
+          axis: 0
+        output: mu
+      - op: sub
+        inputs: [X, mu]
+        output: D
+      - op: cov
+        inputs: [X]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+      - op: inverse
+        inputs: [S]
+        output: Sinv
+      - op: matmul
+        inputs: [D, Sinv]
+        output: T
+      - op: mul
+        inputs: [T, D]
+        params:
+          reduce: row_sum
+        output: m2
+      - op: sqrt
+        inputs: [m2]
+        output: d
+    expected_outputs:
+      - name: d
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "all(d >= 0)"
+    oracle:
+      numpy: "np.sqrt(np.sum(((X - X.mean(0)) @ np.linalg.inv(np.cov(X, rowvar=False, ddof=1))) * (X - X.mean(0)), axis=1))"
+      scipy: "scipy.spatial.distance.cdist(X, X.mean(0, keepdims=True), metric='mahalanobis', VI=np.linalg.inv(np.cov(X, rowvar=False, ddof=1))).ravel()"
+
+  - id: covariance_shrinkage_identity
+    category: statistics
+    summary: Linear shrinkage covariance estimator toward scaled identity.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: alpha
+        shape: []
+        dtype: float64
+    preconditions:
+      - "n >= 2"
+      - "0 <= alpha <= 1"
+    dag:
+      - op: cov
+        inputs: [X]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+      - op: mean
+        inputs: ["diag(S)"]
+        output: tau
+      - op: add
+        inputs: ["mul(S, sub(1, alpha))", alpha]
+        params:
+          broadcast: tau_identity
+        output: S_shrunk
+    expected_outputs:
+      - name: S_shrunk
+        shape: [p, p]
+        dtype: float64
+    invariants:
+      - "transpose(S_shrunk) == S_shrunk"
+    oracle:
+      numpy: "(1-alpha)*S + alpha*np.trace(S)/S.shape[0]*np.eye(S.shape[0])"
+      scipy: null
+
+  - id: rolling_mean
+    category: quant_finance
+    summary: Rolling mean over trailing window for return series.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: w
+        shape: []
+        dtype: int64
+    preconditions:
+      - "t >= w"
+      - "w >= 1"
+    dag:
+      - op: cumsum
+        inputs: [r]
+        output: cs
+      - op: sub
+        inputs: ["cs[w:]", "cs[:-w]"]
+        output: win_sum
+      - op: div
+        inputs: [win_sum, w]
+        output: m
+    expected_outputs:
+      - name: m
+        shape: [t-w]
+        dtype: float64
+    invariants:
+      - "len(m) == t - w"
+    oracle:
+      numpy: "(np.cumsum(r)[w:] - np.cumsum(r)[:-w]) / w"
+      scipy: null
+
+  - id: rolling_variance
+    category: quant_finance
+    summary: Rolling sample variance over trailing window.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: w
+        shape: []
+        dtype: int64
+    preconditions:
+      - "t >= w"
+      - "w >= 2"
+    dag:
+      - op: cumsum
+        inputs: [r]
+        output: cs
+      - op: mul
+        inputs: [r, r]
+        output: r2
+      - op: cumsum
+        inputs: [r2]
+        output: cs2
+      - op: sub
+        inputs: ["cs[w:]", "cs[:-w]"]
+        output: s1
+      - op: sub
+        inputs: ["cs2[w:]", "cs2[:-w]"]
+        output: s2
+      - op: div
+        inputs: ["sub(s2, div(mul(s1, s1), w))", "sub(w, 1)"]
+        output: v
+    expected_outputs:
+      - name: v
+        shape: [t-w]
+        dtype: float64
+    invariants:
+      - "all(v >= 0)"
+    oracle:
+      numpy: "(s2 - s1**2/w)/(w-1)"
+      scipy: null
+
+  - id: simple_returns
+    category: quant_finance
+    summary: Compute simple returns from price series.
+    inputs:
+      - name: p
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "all(p[:-1] > 0)"
+    dag:
+      - op: div
+        inputs: ["p[1:]", "p[:-1]"]
+        output: ratio
+      - op: sub
+        inputs: [ratio, 1]
+        output: r
+    expected_outputs:
+      - name: r
+        shape: [t-1]
+        dtype: float64
+    invariants:
+      - "r > -1"
+    oracle:
+      numpy: "p[1:] / p[:-1] - 1"
+      scipy: null
+
+  - id: log_returns
+    category: quant_finance
+    summary: Compute log returns from price series.
+    inputs:
+      - name: p
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "all(p > 0)"
+    dag:
+      - op: div
+        inputs: ["p[1:]", "p[:-1]"]
+        output: ratio
+      - op: log
+        inputs: [ratio]
+        output: rlog
+    expected_outputs:
+      - name: rlog
+        shape: [t-1]
+        dtype: float64
+    invariants:
+      - "exp(sum(rlog)) == p[-1] / p[0]"
+    oracle:
+      numpy: "np.log(p[1:] / p[:-1])"
+      scipy: null
+
+  - id: cumulative_returns
+    category: quant_finance
+    summary: Cumulative performance index from simple returns.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "all(r > -1)"
+    dag:
+      - op: add
+        inputs: [r, 1]
+        output: gross
+      - op: cumsum
+        inputs: ["log(gross)"]
+        output: log_cum
+      - op: exp
+        inputs: [log_cum]
+        output: wealth
+    expected_outputs:
+      - name: wealth
+        shape: [t]
+        dtype: float64
+    invariants:
+      - "wealth[0] == 1 + r[0]"
+      - "all(wealth > 0)"
+    oracle:
+      numpy: "np.exp(np.cumsum(np.log(1 + r)))"
+      scipy: null
+
+  - id: drawdown_series
+    category: quant_finance
+    summary: Running drawdown from wealth index.
+    inputs:
+      - name: wealth
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 1"
+      - "all(wealth > 0)"
+    dag:
+      - op: max
+        inputs: [wealth]
+        params:
+          axis: cumulative
+        output: peak
+      - op: div
+        inputs: [wealth, peak]
+        output: rel
+      - op: sub
+        inputs: [rel, 1]
+        output: dd
+    expected_outputs:
+      - name: dd
+        shape: [t]
+        dtype: float64
+    invariants:
+      - "all(dd <= 0)"
+      - "max(dd) == 0"
+    oracle:
+      numpy: "wealth / np.maximum.accumulate(wealth) - 1"
+      scipy: null
+
+  - id: downside_deviation
+    category: quant_finance
+    summary: Downside deviation relative to threshold target.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: target
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 1"
+    dag:
+      - op: sub
+        inputs: [target, r]
+        output: shortfall
+      - op: clip
+        inputs: [shortfall]
+        params:
+          min: 0
+        output: downside
+      - op: mul
+        inputs: [downside, downside]
+        output: ds2
+      - op: mean
+        inputs: [ds2]
+        output: m
+      - op: sqrt
+        inputs: [m]
+        output: dd
+    expected_outputs:
+      - name: dd
+        shape: []
+        dtype: float64
+    invariants:
+      - "dd >= 0"
+    oracle:
+      numpy: "np.sqrt(np.mean(np.clip(target - r, 0, None) ** 2))"
+      scipy: null
+
+  - id: sharpe_ratio
+    category: quant_finance
+    summary: Annualized Sharpe ratio from return series.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: rf
+        shape: []
+        dtype: float64
+      - name: periods_per_year
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "std(r - rf) > 0"
+    dag:
+      - op: sub
+        inputs: [r, rf]
+        output: ex
+      - op: mean
+        inputs: [ex]
+        output: mu
+      - op: std
+        inputs: [ex]
+        params:
+          ddof: 1
+        output: sigma
+      - op: div
+        inputs: [mu, sigma]
+        output: sr
+      - op: mul
+        inputs: [sr, "sqrt(periods_per_year)"]
+        output: sr_ann
+    expected_outputs:
+      - name: sr_ann
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(sr_ann)"
+    oracle:
+      numpy: "np.mean(r-rf)/np.std(r-rf, ddof=1)*np.sqrt(periods_per_year)"
+      scipy: null
+
+  - id: sortino_ratio
+    category: quant_finance
+    summary: Annualized Sortino ratio with downside deviation.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: target
+        shape: []
+        dtype: float64
+      - name: periods_per_year
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+    dag:
+      - op: sub
+        inputs: [r, target]
+        output: ex
+      - op: mean
+        inputs: [ex]
+        output: mu
+      - op: sub
+        inputs: [target, r]
+        output: sf
+      - op: clip
+        inputs: [sf]
+        params:
+          min: 0
+        output: dn
+      - op: mul
+        inputs: [dn, dn]
+        output: dn2
+      - op: mean
+        inputs: [dn2]
+        output: dmean
+      - op: sqrt
+        inputs: [dmean]
+        output: dd
+      - op: div
+        inputs: [mu, dd]
+        output: so
+      - op: mul
+        inputs: [so, "sqrt(periods_per_year)"]
+        output: so_ann
+    expected_outputs:
+      - name: so_ann
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(so_ann)"
+    oracle:
+      numpy: "np.mean(r-target)/np.sqrt(np.mean(np.clip(target-r,0,None)**2))*np.sqrt(periods_per_year)"
+      scipy: null
+
+  - id: beta_vs_benchmark
+    category: quant_finance
+    summary: CAPM beta from covariance ratio.
+    inputs:
+      - name: asset
+        shape: [t]
+        dtype: float64
+      - name: market
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "var(market, ddof=1) > 0"
+    dag:
+      - op: cov
+        inputs: ["restack(asset, market)"]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+      - op: select_row
+        inputs: [S, 0]
+        output: s0
+      - op: select_col
+        inputs: [S, 1]
+        output: cov_am
+      - op: var
+        inputs: [market]
+        params:
+          ddof: 1
+        output: vm
+      - op: div
+        inputs: [cov_am, vm]
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(beta)"
+    oracle:
+      numpy: "np.cov(asset, market, ddof=1)[0,1] / np.var(market, ddof=1)"
+      scipy: null
+
+  - id: alpha_vs_benchmark
+    category: quant_finance
+    summary: CAPM alpha from average excess returns and beta.
+    inputs:
+      - name: asset
+        shape: [t]
+        dtype: float64
+      - name: market
+        shape: [t]
+        dtype: float64
+      - name: rf
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "var(market, ddof=1) > 0"
+    dag:
+      - op: sub
+        inputs: [asset, rf]
+        output: aex
+      - op: sub
+        inputs: [market, rf]
+        output: mex
+      - op: cov
+        inputs: ["restack(aex, mex)"]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+      - op: div
+        inputs: ["S[0,1]", "var(mex, ddof=1)"]
+        output: beta
+      - op: sub
+        inputs: ["mean(aex)", "mul(beta, mean(mex))"]
+        output: alpha
+    expected_outputs:
+      - name: alpha
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(alpha)"
+    oracle:
+      numpy: "np.mean(asset-rf) - (np.cov(asset-rf, market-rf, ddof=1)[0,1]/np.var(market-rf, ddof=1))*np.mean(market-rf)"
+      scipy: null
+
+  - id: tracking_error
+    category: quant_finance
+    summary: Annualized tracking error of active returns.
+    inputs:
+      - name: asset
+        shape: [t]
+        dtype: float64
+      - name: benchmark
+        shape: [t]
+        dtype: float64
+      - name: periods_per_year
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+    dag:
+      - op: sub
+        inputs: [asset, benchmark]
+        output: active
+      - op: std
+        inputs: [active]
+        params:
+          ddof: 1
+        output: te
+      - op: mul
+        inputs: [te, "sqrt(periods_per_year)"]
+        output: te_ann
+    expected_outputs:
+      - name: te_ann
+        shape: []
+        dtype: float64
+    invariants:
+      - "te_ann >= 0"
+    oracle:
+      numpy: "np.std(asset-benchmark, ddof=1)*np.sqrt(periods_per_year)"
+      scipy: null
+
+  - id: information_ratio
+    category: quant_finance
+    summary: Information ratio from active return mean and tracking error.
+    inputs:
+      - name: asset
+        shape: [t]
+        dtype: float64
+      - name: benchmark
+        shape: [t]
+        dtype: float64
+      - name: periods_per_year
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "std(asset-benchmark, ddof=1) > 0"
+    dag:
+      - op: sub
+        inputs: [asset, benchmark]
+        output: active
+      - op: mean
+        inputs: [active]
+        output: am
+      - op: std
+        inputs: [active]
+        params:
+          ddof: 1
+        output: asd
+      - op: div
+        inputs: [am, asd]
+        output: ir
+      - op: mul
+        inputs: [ir, "sqrt(periods_per_year)"]
+        output: ir_ann
+    expected_outputs:
+      - name: ir_ann
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(ir_ann)"
+    oracle:
+      numpy: "np.mean(asset-benchmark)/np.std(asset-benchmark, ddof=1)*np.sqrt(periods_per_year)"
+      scipy: null
+
+  - id: value_at_risk_historical
+    category: quant_finance
+    summary: Historical Value-at-Risk at confidence q.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: q
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 1"
+      - "0 < q < 1"
+    dag:
+      - op: min
+        inputs: [r]
+        params:
+          quantile: q
+        output: var_q
+    expected_outputs:
+      - name: var_q
+        shape: []
+        dtype: float64
+    invariants:
+      - "var_q <= max(r)"
+      - "var_q >= min(r)"
+    oracle:
+      numpy: "np.quantile(r, q)"
+      scipy: null
+
+  - id: expected_shortfall_historical
+    category: quant_finance
+    summary: Historical expected shortfall below VaR quantile.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: q
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 2"
+      - "0 < q < 1"
+    dag:
+      - op: min
+        inputs: [r]
+        params:
+          quantile: q
+        output: var_q
+      - op: select_row
+        inputs: [r, "r <= var_q"]
+        output: tail
+      - op: mean
+        inputs: [tail]
+        output: es
+    expected_outputs:
+      - name: es
+        shape: []
+        dtype: float64
+    invariants:
+      - "es <= var_q"
+    oracle:
+      numpy: "r[r <= np.quantile(r, q)].mean()"
+      scipy: null
+
+  - id: ewma_variance
+    category: quant_finance
+    summary: EWMA variance recursion.
+    inputs:
+      - name: r
+        shape: [t]
+        dtype: float64
+      - name: lambda
+        shape: []
+        dtype: float64
+    preconditions:
+      - "t >= 1"
+      - "0 < lambda < 1"
+    dag:
+      - op: var
+        inputs: [r]
+        params:
+          ddof: 1
+        output: v0
+      - op: restack
+        inputs: [v0, r]
+        params:
+          recurrence: "v_t = lambda * v_{t-1} + (1-lambda) * r_t^2"
+        output: v
+    expected_outputs:
+      - name: v
+        shape: [t]
+        dtype: float64
+    invariants:
+      - "all(v >= 0)"
+    oracle:
+      numpy: "recursive ewma variance"
+      scipy: null
+
+  - id: portfolio_return
+    category: quant_finance
+    summary: Portfolio returns from weights and asset return matrix.
+    inputs:
+      - name: R
+        shape: [t, n]
+        dtype: float64
+      - name: w
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "sum(w) == 1"
+    dag:
+      - op: matmul
+        inputs: [R, w]
+        output: rp
+    expected_outputs:
+      - name: rp
+        shape: [t]
+        dtype: float64
+    invariants:
+      - "mean(rp) == dot(mean(R, axis=0), w)"
+    oracle:
+      numpy: "R @ w"
+      scipy: null
+
+  - id: portfolio_variance
+    category: quant_finance
+    summary: Portfolio variance from covariance matrix and weights.
+    inputs:
+      - name: Sigma
+        shape: [n, n]
+        dtype: float64
+      - name: w
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "transpose(Sigma) == Sigma"
+    dag:
+      - op: matmul
+        inputs: [Sigma, w]
+        output: Sw
+      - op: matmul
+        inputs: ["transpose(w)", Sw]
+        output: vp
+    expected_outputs:
+      - name: vp
+        shape: []
+        dtype: float64
+    invariants:
+      - "vp >= 0"
+    oracle:
+      numpy: "w.T @ Sigma @ w"
+      scipy: null
+
+  - id: global_min_variance_weights
+    category: quant_finance
+    summary: Closed-form global minimum variance portfolio weights.
+    inputs:
+      - name: Sigma
+        shape: [n, n]
+        dtype: float64
+    preconditions:
+      - "Sigma positive definite"
+    dag:
+      - op: inverse
+        inputs: [Sigma]
+        output: Sinv
+      - op: matmul
+        inputs: [Sinv, ones_n]
+        output: num
+      - op: matmul
+        inputs: ["transpose(ones_n)", num]
+        output: den
+      - op: div
+        inputs: [num, den]
+        output: w
+    expected_outputs:
+      - name: w
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "sum(w) == 1"
+    oracle:
+      numpy: "(np.linalg.inv(Sigma) @ np.ones(n)) / (np.ones(n) @ np.linalg.inv(Sigma) @ np.ones(n))"
+      scipy: "scipy.linalg.solve(Sigma, np.ones(n)) / (np.ones(n) @ scipy.linalg.solve(Sigma, np.ones(n)))"
+
+  - id: mean_variance_tangency_weights
+    category: quant_finance
+    summary: Tangency portfolio weights with risk-free rate.
+    inputs:
+      - name: mu
+        shape: [n]
+        dtype: float64
+      - name: Sigma
+        shape: [n, n]
+        dtype: float64
+      - name: rf
+        shape: []
+        dtype: float64
+    preconditions:
+      - "Sigma positive definite"
+    dag:
+      - op: sub
+        inputs: [mu, rf]
+        output: excess
+      - op: solve
+        inputs: [Sigma, excess]
+        output: z
+      - op: div
+        inputs: [z, "sum(z)"]
+        output: w
+    expected_outputs:
+      - name: w
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "sum(w) == 1"
+    oracle:
+      numpy: "z = np.linalg.solve(Sigma, mu-rf); z/z.sum()"
+      scipy: "z = scipy.linalg.solve(Sigma, mu-rf, assume_a='pos'); z/z.sum()"
+
+  - id: risk_parity_objective
+    category: quant_finance
+    summary: Compute risk contributions and squared error objective to target budget.
+    inputs:
+      - name: Sigma
+        shape: [n, n]
+        dtype: float64
+      - name: w
+        shape: [n]
+        dtype: float64
+      - name: b
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "all(w > 0)"
+      - "sum(w) == 1"
+      - "all(b > 0)"
+      - "sum(b) == 1"
+    dag:
+      - op: matmul
+        inputs: [Sigma, w]
+        output: mrc
+      - op: mul
+        inputs: [w, mrc]
+        output: rc
+      - op: sum
+        inputs: [rc]
+        output: vp
+      - op: div
+        inputs: [rc, vp]
+        output: rc_share
+      - op: sub
+        inputs: [rc_share, b]
+        output: err
+      - op: mul
+        inputs: [err, err]
+        output: err2
+      - op: sum
+        inputs: [err2]
+        output: obj
+    expected_outputs:
+      - name: obj
+        shape: []
+        dtype: float64
+      - name: rc_share
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "sum(rc_share) == 1"
+      - "obj >= 0"
+    oracle:
+      numpy: "rc = w*(Sigma@w); share = rc/(w.T@Sigma@w); obj = np.sum((share-b)**2)"
+      scipy: null
+
+  - id: black_litterman_posterior_mean
+    category: quant_finance
+    summary: Black-Litterman posterior expected returns.
+    inputs:
+      - name: pi
+        shape: [n]
+        dtype: float64
+      - name: Sigma
+        shape: [n, n]
+        dtype: float64
+      - name: P
+        shape: [k, n]
+        dtype: float64
+      - name: q
+        shape: [k]
+        dtype: float64
+      - name: Omega
+        shape: [k, k]
+        dtype: float64
+      - name: tau
+        shape: []
+        dtype: float64
+    preconditions:
+      - "Sigma positive definite"
+      - "Omega positive definite"
+      - "tau > 0"
+    dag:
+      - op: inverse
+        inputs: ["mul(tau, Sigma)"]
+        output: A
+      - op: transpose
+        inputs: [P]
+        output: PT
+      - op: inverse
+        inputs: [Omega]
+        output: Oinv
+      - op: matmul
+        inputs: [PT, Oinv]
+        output: PTO
+      - op: matmul
+        inputs: [PTO, P]
+        output: B
+      - op: add
+        inputs: [A, B]
+        output: M
+      - op: matmul
+        inputs: [A, pi]
+        output: rhs1
+      - op: matmul
+        inputs: [PTO, q]
+        output: rhs2
+      - op: add
+        inputs: [rhs1, rhs2]
+        output: rhs
+      - op: solve
+        inputs: [M, rhs]
+        output: mu_bl
+    expected_outputs:
+      - name: mu_bl
+        shape: [n]
+        dtype: float64
+    invariants:
+      - "isfinite(mu_bl)"
+    oracle:
+      numpy: "np.linalg.solve(np.linalg.inv(tau*Sigma)+P.T@np.linalg.inv(Omega)@P, np.linalg.inv(tau*Sigma)@pi + P.T@np.linalg.inv(Omega)@q)"
+      scipy: "scipy.linalg.solve(np.linalg.inv(tau*Sigma)+P.T@scipy.linalg.inv(Omega)@P, np.linalg.inv(tau*Sigma)@pi + P.T@scipy.linalg.inv(Omega)@q)"
+
+  - id: cointegration_hedge_ratio_ols
+    category: quant_finance
+    summary: Hedge ratio via OLS of y on x for pairs trading.
+    inputs:
+      - name: x
+        shape: [t]
+        dtype: float64
+      - name: y
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 3"
+      - "var(x, ddof=1) > 0"
+    dag:
+      - op: cov
+        inputs: ["restack(y, x)"]
+        params:
+          rowvar: false
+          ddof: 1
+        output: S
+      - op: div
+        inputs: ["S[0,1]", "S[1,1]"]
+        output: beta
+      - op: sub
+        inputs: [y, "mul(beta, x)"]
+        output: spread
+    expected_outputs:
+      - name: beta
+        shape: []
+        dtype: float64
+      - name: spread
+        shape: [t]
+        dtype: float64
+    invariants:
+      - "cov(spread, x) == 0"
+    oracle:
+      numpy: "beta = np.cov(y, x, ddof=1)[0,1] / np.var(x, ddof=1); spread = y - beta*x"
+      scipy: "scipy.stats.linregress(x, y).slope"
+
+  - id: kalman_filter_one_step_update
+    category: fitting
+    summary: One-step linear Kalman filter measurement update.
+    inputs:
+      - name: x_pred
+        shape: [n]
+        dtype: float64
+      - name: P_pred
+        shape: [n, n]
+        dtype: float64
+      - name: H
+        shape: [m, n]
+        dtype: float64
+      - name: R
+        shape: [m, m]
+        dtype: float64
+      - name: y
+        shape: [m]
+        dtype: float64
+    preconditions:
+      - "P_pred symmetric positive semidefinite"
+      - "R positive definite"
+    dag:
+      - op: transpose
+        inputs: [H]
+        output: HT
+      - op: matmul
+        inputs: [H, P_pred]
+        output: HP
+      - op: matmul
+        inputs: [HP, HT]
+        output: S0
+      - op: add
+        inputs: [S0, R]
+        output: S
+      - op: matmul
+        inputs: [P_pred, HT]
+        output: PHT
+      - op: solve
+        inputs: [S, "transpose(PHT)"]
+        output: KT
+      - op: transpose
+        inputs: [KT]
+        output: K
+      - op: matmul
+        inputs: [H, x_pred]
+        output: y_pred
+      - op: sub
+        inputs: [y, y_pred]
+        output: innov
+      - op: matmul
+        inputs: [K, innov]
+        output: delta
+      - op: add
+        inputs: [x_pred, delta]
+        output: x_upd
+    expected_outputs:
+      - name: x_upd
+        shape: [n]
+        dtype: float64
+      - name: K
+        shape: [n, m]
+        dtype: float64
+    invariants:
+      - "isfinite(x_upd)"
+    oracle:
+      numpy: "S = H@P_pred@H.T + R; K = P_pred@H.T@np.linalg.inv(S); x_pred + K@(y - H@x_pred)"
+      scipy: "scipy.linalg.solve(S, (P_pred@H.T).T).T"
+
+  - id: ar1_least_squares_fit
+    category: fitting
+    summary: Fit AR(1) coefficient by least squares.
+    inputs:
+      - name: x
+        shape: [t]
+        dtype: float64
+    preconditions:
+      - "t >= 3"
+    dag:
+      - op: select_row
+        inputs: [x, "0:t-1"]
+        output: lag
+      - op: select_row
+        inputs: [x, "1:t"]
+        output: lead
+      - op: dot
+        inputs: [lag, lead]
+        output: num
+      - op: dot
+        inputs: [lag, lag]
+        output: den
+      - op: div
+        inputs: [num, den]
+        output: phi
+    expected_outputs:
+      - name: phi
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(phi)"
+    oracle:
+      numpy: "np.dot(x[:-1], x[1:]) / np.dot(x[:-1], x[:-1])"
+      scipy: null
+
+  - id: t_statistic_mean
+    category: statistics
+    summary: One-sample t-statistic for mean equals zero.
+    inputs:
+      - name: x
+        shape: [n]
+        dtype: float64
+    preconditions:
+      - "n >= 2"
+      - "std(x, ddof=1) > 0"
+    dag:
+      - op: mean
+        inputs: [x]
+        output: mu
+      - op: std
+        inputs: [x]
+        params:
+          ddof: 1
+        output: s
+      - op: div
+        inputs: [mu, "div(s, sqrt(n))"]
+        output: t
+    expected_outputs:
+      - name: t
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(t)"
+    oracle:
+      numpy: "x.mean() / (x.std(ddof=1) / np.sqrt(len(x)))"
+      scipy: "scipy.stats.ttest_1samp(x, popmean=0).statistic"
+
+  - id: two_sample_pooled_t_stat
+    category: statistics
+    summary: Two-sample pooled-variance t statistic.
+    inputs:
+      - name: x1
+        shape: [n1]
+        dtype: float64
+      - name: x2
+        shape: [n2]
+        dtype: float64
+    preconditions:
+      - "n1 >= 2"
+      - "n2 >= 2"
+    dag:
+      - op: mean
+        inputs: [x1]
+        output: m1
+      - op: mean
+        inputs: [x2]
+        output: m2
+      - op: var
+        inputs: [x1]
+        params:
+          ddof: 1
+        output: v1
+      - op: var
+        inputs: [x2]
+        params:
+          ddof: 1
+        output: v2
+      - op: div
+        inputs: ["add(mul(sub(n1,1), v1), mul(sub(n2,1), v2))", "sub(add(n1,n2),2)"]
+        output: sp2
+      - op: sqrt
+        inputs: ["mul(sp2, add(div(1,n1), div(1,n2)))"]
+        output: se
+      - op: div
+        inputs: ["sub(m1, m2)", se]
+        output: t
+    expected_outputs:
+      - name: t
+        shape: []
+        dtype: float64
+    invariants:
+      - "isfinite(t)"
+    oracle:
+      numpy: "(x1.mean()-x2.mean())/np.sqrt((((n1-1)*x1.var(ddof=1)+(n2-1)*x2.var(ddof=1))/(n1+n2-2))*(1/n1+1/n2))"
+      scipy: "scipy.stats.ttest_ind(x1, x2, equal_var=True).statistic"
+
+  - id: principal_component_variance_ratio
+    category: statistics
+    summary: Variance explained ratio for top-k PCA components.
+    inputs:
+      - name: X
+        shape: [n, p]
+        dtype: float64
+      - name: k
+        shape: []
+        dtype: int64
+    preconditions:
+      - "1 <= k <= p"
+      - "n >= 2"
+    dag:
+      - op: mean
+        inputs: [X]
+        params:
+          axis: 0
+        output: mu
+      - op: sub
+        inputs: [X, mu]
+        output: Xc
+      - op: svd
+        inputs: [Xc]
+        output: svd_triplet
+      - op: select_col
+        inputs: [svd_triplet, 1]
+        output: S
+      - op: mul
+        inputs: [S, S]
+        output: evals
+      - op: div
+        inputs: ["sum(evals[:k])", "sum(evals)"]
+        output: ratio
+    expected_outputs:
+      - name: ratio
+        shape: []
+        dtype: float64
+    invariants:
+      - "0 <= ratio <= 1"
+    oracle:
+      numpy: "s = np.linalg.svd(X - X.mean(0), full_matrices=False, compute_uv=False); (s[:k]**2).sum()/(s**2).sum()"
+      scipy: "scipy.linalg.svd(X - X.mean(0), full_matrices=False, compute_uv=False)"
