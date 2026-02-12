@@ -36,6 +36,21 @@ Each recipe entry must include:
 6. Evaluate `invariants` and compare with `oracle` outputs (NumPy/SciPy baseline) within tolerance.
 7. Report per-recipe pass/fail with failing invariant/operator details.
 
+## Regenerating tests
+
+Generate recipe-based pytest files with:
+
+```bash
+python3 tools/generate_recipe_tests.py
+```
+
+This writes deterministic test modules under `tests/generated/`:
+
+- `test_recipe_matrix_ops_generated.py` (all `matrix_ops` recipes with parametrized cases)
+- `test_recipe_smoke_generated.py` (one smoke recipe each for `fitting`, `statistics`, and `quant_finance`)
+
+The generator sorts recipes by id and emits recipe-id comments above each case to keep diffs stable and readable.
+
 ## Notes
 
 - Keep `id` values stable to preserve historical test tracking.
