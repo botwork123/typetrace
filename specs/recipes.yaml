@@ -1757,3 +1757,235 @@ recipes:
     oracle:
       numpy: "s = np.linalg.svd(X - X.mean(0), full_matrices=False, compute_uv=False); (s[:k]**2).sum()/(s**2).sum()"
       scipy: "scipy.linalg.svd(X - X.mean(0), full_matrices=False, compute_uv=False)"
+
+  - id: weighted_cross_sectional_return_xarray
+    category: quant_finance
+    summary: Weighted cross-sectional return using xarray aligned asset coords.
+    inputs:
+      - name: returns
+        shape: [time, asset]
+        dtype: float64
+      - name: weights
+        shape: [asset]
+        dtype: float64
+    preconditions:
+      - "sum(weights) == 1"
+    dag:
+      - op: mul
+        inputs: [returns, weights]
+        output: weighted
+      - op: sum
+        inputs: [weighted]
+        params:
+          axis: asset
+        output: portfolio_return
+    expected_outputs:
+      - name: portfolio_return
+        shape: [time]
+        dtype: float64
+    invariants:
+      - "shape(portfolio_return) == [time]"
+    oracle:
+      numpy: "(returns * weights).sum(axis=1)"
+      scipy: null
+
+  - id: weighted_cross_sectional_return_pandas_multiindex
+    category: quant_finance
+    summary: Weighted cross-sectional return using pandas MultiIndex [time, asset].
+    inputs:
+      - name: returns
+        shape: [time, asset]
+        dtype: float64
+      - name: weights
+        shape: [asset]
+        dtype: float64
+    preconditions:
+      - "sum(weights) == 1"
+    dag:
+      - op: mul
+        inputs: [returns, weights]
+        output: weighted
+      - op: sum
+        inputs: [weighted]
+        params:
+          axis: asset
+        output: portfolio_return
+    expected_outputs:
+      - name: portfolio_return
+        shape: [time]
+        dtype: float64
+    invariants:
+      - "index_name(portfolio_return) == time"
+    oracle:
+      numpy: "(returns * weights).sum(axis=1)"
+      scipy: null
+
+  - id: rolling_beta_xarray
+    category: quant_finance
+    summary: Rolling beta vs benchmark with xarray rolling windows.
+    inputs:
+      - name: asset
+        shape: [time]
+        dtype: float64
+      - name: market
+        shape: [time]
+        dtype: float64
+    preconditions:
+      - "time >= 4"
+    dag:
+      - op: cov
+        inputs: [asset, market]
+        params:
+          rolling: 3
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [time]
+        dtype: float64
+    invariants:
+      - "isfinite(beta[2:])"
+    oracle:
+      numpy: "(np.cov(asset[-3:], market[-3:], ddof=1)[0,1] / np.var(market[-3:], ddof=1))"
+      scipy: null
+
+  - id: rolling_beta_pandas_multiindex
+    category: quant_finance
+    summary: Rolling beta grouped by asset over pandas MultiIndex [time, asset].
+    inputs:
+      - name: returns
+        shape: [time, asset]
+        dtype: float64
+      - name: market
+        shape: [time]
+        dtype: float64
+    preconditions:
+      - "time >= 4"
+    dag:
+      - op: cov
+        inputs: [returns, market]
+        params:
+          rolling: 3
+        output: beta
+    expected_outputs:
+      - name: beta
+        shape: [time, asset]
+        dtype: float64
+    invariants:
+      - "index_names(beta) == [time, asset]"
+    oracle:
+      numpy: "returns"
+      scipy: null
+
+  - id: ridge_exposures_xarray
+    category: fitting
+    summary: Ridge exposures from factor matrix and asset returns in xarray.
+    inputs:
+      - name: factors
+        shape: [time, factor]
+        dtype: float64
+      - name: returns
+        shape: [time, asset]
+        dtype: float64
+    preconditions:
+      - "time > factor"
+    dag:
+      - op: solve
+        inputs: [factors, returns]
+        params:
+          ridge: 0.1
+        output: exposures
+    expected_outputs:
+      - name: exposures
+        shape: [factor, asset]
+        dtype: float64
+    invariants:
+      - "shape(exposures) == [factor, asset]"
+    oracle:
+      numpy: "np.linalg.solve(factors.T @ factors + 0.1 * np.eye(factors.shape[1]), factors.T @ returns)"
+      scipy: null
+
+  - id: ridge_exposures_pandas_multiindex
+    category: fitting
+    summary: Ridge exposures from pandas MultiIndex frame with [time, asset].
+    inputs:
+      - name: panel
+        shape: [time, asset]
+        dtype: float64
+      - name: factors
+        shape: [time, factor]
+        dtype: float64
+    preconditions:
+      - "time > factor"
+    dag:
+      - op: solve
+        inputs: [factors, panel]
+        params:
+          ridge: 0.1
+        output: exposures
+    expected_outputs:
+      - name: exposures
+        shape: [factor, asset]
+        dtype: float64
+    invariants:
+      - "shape(exposures) == [factor, asset]"
+    oracle:
+      numpy: "np.linalg.solve(factors.T @ factors + 0.1 * np.eye(factors.shape[1]), factors.T @ panel)"
+      scipy: null
+
+  - id: selection_concat_flow_xarray
+    category: matrix_ops
+    summary: Select a subset of assets then concat along new scenario dim (xarray).
+    inputs:
+      - name: returns
+        shape: [time, asset]
+        dtype: float64
+    preconditions:
+      - "asset >= 2"
+    dag:
+      - op: select_col
+        inputs: [returns, 0]
+        output: base
+      - op: select_col
+        inputs: [returns, 1]
+        output: alt
+      - op: restack
+        inputs: [base, alt]
+        output: stacked
+    expected_outputs:
+      - name: stacked
+        shape: [scenario, time]
+        dtype: float64
+    invariants:
+      - "shape(stacked) == [2, time]"
+    oracle:
+      numpy: "np.stack([returns[:, 0], returns[:, 1]], axis=0)"
+      scipy: null
+
+  - id: selection_concat_flow_pandas_multiindex
+    category: matrix_ops
+    summary: Select subset by asset then concat into scenario-level MultiIndex frame.
+    inputs:
+      - name: panel
+        shape: [time, asset]
+        dtype: float64
+    preconditions:
+      - "asset >= 2"
+    dag:
+      - op: select_col
+        inputs: [panel, 0]
+        output: base
+      - op: select_col
+        inputs: [panel, 1]
+        output: alt
+      - op: restack
+        inputs: [base, alt]
+        output: stacked
+    expected_outputs:
+      - name: stacked
+        shape: [scenario, time]
+        dtype: float64
+    invariants:
+      - "index_name(stacked) == scenario"
+    oracle:
+      numpy: "np.stack([panel[:, 0], panel[:, 1]], axis=0)"
+      scipy: null

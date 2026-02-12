@@ -71,7 +71,7 @@ class TestPandasAdapter:
         )
         result = from_pandas(df)
 
-        assert result.index == {"group": 4, "sub": 4}
+        assert result.index == {"group": 2, "sub": 2}
 
     def test_from_pandas_series(self) -> None:
         """from_pandas extracts TypeDesc from Series."""
@@ -117,7 +117,10 @@ class TestPandasAdapter:
 
         assert isinstance(result, pd.DataFrame)
         assert list(result.columns) == ["a", "b", "c"]
-        assert len(result) == 0
+        assert len(result) == 4
+        assert result["a"].iloc[0] == 0.0
+        assert result["b"].iloc[1] == 1
+        assert bool(result["c"].iloc[0]) is True
 
     def test_make_dataframe_sample_with_index(self) -> None:
         """make_dataframe_sample sets index name."""
@@ -134,6 +137,8 @@ class TestPandasAdapter:
         result = make_dataframe_sample(t)
 
         assert result.index.name == "row_id"
+        assert len(result) == 10
+        assert result["a"].iloc[3] == 0.3333333333333333
 
     def test_make_dataframe_sample_no_columns(self) -> None:
         """make_dataframe_sample raises ValueError without columns."""
@@ -155,7 +160,8 @@ class TestPandasAdapter:
 
         assert isinstance(result, pd.Series)
         assert result.dtype == "int64"
-        assert len(result) == 0
+        assert len(result) == 4
+        assert result.iloc[-1] == 3
 
     def test_make_series_sample_with_index(self) -> None:
         """make_series_sample sets index name."""
@@ -167,6 +173,8 @@ class TestPandasAdapter:
         result = make_series_sample(t)
 
         assert result.index.name == "time"
+        assert len(result) == 100
+        assert result.iloc[50] == 0.5050505050505051
 
     def test_make_series_sample_default_dtype(self) -> None:
         """make_series_sample uses float64 as default dtype."""
@@ -248,6 +256,8 @@ class TestXarrayAdapter:
         assert isinstance(result, xr.DataArray)
         assert set(result.dims) == {"x", "y"}
         assert result.dtype == "float32"
+        assert result.shape == (10, 20)
+        assert result.coords["x"].values[0] == 0
 
     def test_make_xarray_sample_with_symbol(self) -> None:
         """make_xarray_sample handles symbolic dims."""
@@ -260,6 +270,7 @@ class TestXarrayAdapter:
 
         assert isinstance(result, xr.DataArray)
         assert set(result.dims) == {"x", "y"}
+        assert result.shape == (4, 20)
 
     def test_make_xarray_sample_no_dims(self) -> None:
         """make_xarray_sample raises ValueError without dims."""

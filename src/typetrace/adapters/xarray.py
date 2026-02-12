@@ -4,6 +4,7 @@ xarray adapter for typetrace.
 Handles xarray DataArray and Dataset types.
 """
 
+import os
 from typing import Any
 
 from typetrace.core import Dims, Symbol, TypeDesc
@@ -27,24 +28,40 @@ def from_xarray(value: Any) -> TypeDesc:
         dtype = str(value.dtype) if value.dtype != np.dtype("O") else "object"
         return TypeDesc(kind="ndarray", dims=dims, dtype=dtype)
     elif isinstance(value, xr.Dataset):
-        # For Dataset, return a class-like TypeDesc with fields
         fields = {name: from_xarray(da) for name, da in value.data_vars.items()}
         return TypeDesc(kind="class", fields=fields)
     else:
         raise TypeError(f"Expected xarray type, got {type(value)}")
 
 
+def _default_sample_size() -> int:
+    value = os.getenv("TYPETRACE_SAMPLE_SIZE", "4")
+    return max(int(value), 1)
+
+
+def _sample_dim_size(size: int | Symbol) -> int:
+    if isinstance(size, Symbol):
+        return _default_sample_size()
+    return size if size > 0 else _default_sample_size()
+
+
+def _coord_values(dim_name: str, size: int) -> Any:
+    import numpy as np
+
+    key = dim_name.lower()
+    if "time" in key or key in {"date", "datetime"}:
+        return np.arange(np.datetime64("2024-01-01"), np.datetime64("2024-01-01") + size)
+    if "asset" in key or key in {"symbol", "ticker"}:
+        return np.array([f"A{i:03d}" for i in range(size)], dtype=object)
+    return np.arange(size)
+
+
 def make_xarray_sample(type_desc: TypeDesc) -> Any:
     """
-    Create minimal xarray DataArray from TypeDesc.
+    Create xarray DataArray from TypeDesc.
 
-    Creates a zero-sized array with correct dims and dtype.
-
-    Args:
-        type_desc: TypeDesc with kind='ndarray'
-
-    Returns:
-        xarray.DataArray with correct structure
+    Builds a small, non-empty array with meaningful coordinates so execution-based
+    inference can exercise selection, alignment, and concat behaviors.
     """
     import numpy as np
     import xarray as xr
@@ -52,17 +69,9 @@ def make_xarray_sample(type_desc: TypeDesc) -> Any:
     if type_desc.dims is None:
         raise ValueError("Cannot make xarray sample without dims")
 
-    # Use size 0 for each dimension to minimize memory
-    shape = []
-    dim_names = []
-    for name, size in type_desc.dims.items():
-        dim_names.append(name)
-        if isinstance(size, Symbol):
-            shape.append(0)  # Symbolic dims get size 0 in sample
-        else:
-            shape.append(0)  # All dims get size 0 for minimal sample
-
+    dim_names = list(type_desc.dims.keys())
+    shape = tuple(_sample_dim_size(size) for size in type_desc.dims.values())
+    coords = {name: _coord_values(name, size) for name, size in zip(dim_names, shape)}
     dtype = type_desc.dtype or "float64"
-    data = np.empty(shape, dtype=dtype)
-
-    return xr.DataArray(data, dims=dim_names)
+    data = np.arange(int(np.prod(shape)), dtype="float64").reshape(shape).astype(dtype)
+    return xr.DataArray(data, dims=dim_names, coords=coords)

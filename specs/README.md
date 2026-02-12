@@ -55,3 +55,4 @@ The generator sorts recipes by id and emits recipe-id comments above each case t
 
 - Keep `id` values stable to preserve historical test tracking.
 - Additive extensions should be backward-compatible: append new recipes instead of renaming existing ids.
+- See `docs/showcase_xarray_pandas.md` for paired xarray/pandas MultiIndex examples tied to explicit recipe ids.
