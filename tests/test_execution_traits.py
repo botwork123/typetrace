@@ -35,6 +35,8 @@ from typetrace.layout_ops import (
             },
             "layout_order='F' requires contiguous_f=True",
         ),
+        ({"dtype": "float32", "shape": (-1,)}, "Shape dimensions must be >= 0"),
+        ({"dtype": "float32", "shape": (1,), "device": "metal"}, "Unsupported device"),
     ],
 )
 def test_execution_traits_validation_errors(kwargs: dict, error: str) -> None:
@@ -263,18 +265,6 @@ def test_infer_execution_traits_numpy_hidden_copy_condition(
     assert source.layout_order == "strided"
     assert compatibility.requires_copy is True
     assert compatibility.reasons[-1] == "C-contiguous buffer required by target"
-
-
-@pytest.mark.parametrize(
-    "kwargs,error",
-    [
-        ({"dtype": "float32", "shape": (-1,)}, "Shape dimensions must be >= 0"),
-        ({"dtype": "float32", "shape": (1,), "device": "metal"}, "Unsupported device"),
-    ],
-)
-def test_execution_traits_additional_validation(kwargs: dict, error: str) -> None:
-    with pytest.raises(ValueError, match=error):
-        ExecutionTraits(**kwargs)
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,9 @@
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Callable, Literal, cast
+
+from typetrace.runtime_utils import infer_drjit_dtype, module_root
 
 Device = Literal["cpu", "cuda"]
 LayoutOrder = Literal["C", "F", "strided"]
@@ -55,18 +57,22 @@ def _validate_layout(layout_order: str, contiguous_c: bool, contiguous_f: bool) 
 
 def infer_execution_traits(value: Any) -> ExecutionTraits:
     """Infer runtime traits from a concrete value (numpy first)."""
-    module_root = type(value).__module__.split(".", 1)[0]
-    if module_root == "numpy":
-        return _infer_numpy_traits(value)
-    if module_root == "xarray":
-        return _infer_numpy_traits(value.values)
-    if module_root == "pandas":
-        return _infer_numpy_traits(value.to_numpy())
-    if module_root == "torch":
-        return _infer_torch_traits(value)
-    if module_root == "drjit":
-        return _infer_drjit_traits(value)
-    raise TypeError(f"Cannot infer execution traits from type {type(value)!r}")
+    dispatch = _dispatch_table()
+    root = module_root(value)
+    if root not in dispatch:
+        raise TypeError(f"Cannot infer execution traits from type {type(value)!r}")
+    return dispatch[root](value)
+
+
+def _dispatch_table() -> dict[str, Callable[[Any], ExecutionTraits]]:
+    """Build runtime trait inference dispatch table."""
+    return {
+        "numpy": _infer_numpy_traits,
+        "xarray": lambda value: _infer_numpy_traits(value.values),
+        "pandas": lambda value: _infer_numpy_traits(value.to_numpy()),
+        "torch": _infer_torch_traits,
+        "drjit": _infer_drjit_traits,
+    }
 
 
 def _infer_numpy_traits(value: Any) -> ExecutionTraits:
@@ -123,19 +129,5 @@ def _infer_drjit_traits(value: Any) -> ExecutionTraits:
 
 
 def _drjit_dtype(value: Any) -> str:
-    type_name = type(value).__name__.lower()
-    if "float64" in type_name or "double" in type_name:
-        return "float64"
-    if "float" in type_name:
-        return "float32"
-    if "uint64" in type_name:
-        return "uint64"
-    if "uint" in type_name:
-        return "uint32"
-    if "int64" in type_name:
-        return "int64"
-    if "int" in type_name:
-        return "int32"
-    if "bool" in type_name:
-        return "bool"
-    return "unknown"
+    """Backward-compatible wrapper around shared DrJit dtype inference."""
+    return infer_drjit_dtype(value)

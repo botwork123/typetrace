@@ -105,6 +105,11 @@ context = TypeContext(bindings={'N': 1000})
 output_type = infer_types(root_node, context)
 ```
 
+## Agent contract
+
+`AGENTS.md` is the canonical implementation contract for architecture, testing, and quality gates.
+All model-specific instruction files (`CODEX.md`, `CLAUDE.md`, `GEMINI.md`, `AI.md`, `COPILOT.md`, `GROK.md`) defer to it via symlink to prevent drift.
+
 ## Development checks
 
 ```bash

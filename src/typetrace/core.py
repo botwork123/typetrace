@@ -10,8 +10,10 @@ TypeDesc is the universal type descriptor that can represent:
 - drjit (DrJit arrays/tensors)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Literal
+
+from typetrace.runtime_utils import module_root
 
 
 @dataclass(frozen=True)
@@ -93,33 +95,11 @@ class TypeDesc:
 
     def with_dims(self, dims: Dims) -> "TypeDesc":
         """Return copy with updated dims."""
-        return TypeDesc(
-            kind=self.kind,
-            dims=dims,
-            shape=self.shape,
-            dtype=self.dtype,
-            dtypes=self.dtypes,
-            index=self.index,
-            columns=self.columns,
-            fields=self.fields,
-            drjit_type=self.drjit_type,
-            static_dims=self.static_dims,
-        )
+        return replace(self, dims=dims)
 
     def with_dtype(self, dtype: str) -> "TypeDesc":
         """Return copy with updated dtype."""
-        return TypeDesc(
-            kind=self.kind,
-            dims=self.dims,
-            shape=self.shape,
-            dtype=dtype,
-            dtypes=self.dtypes,
-            index=self.index,
-            columns=self.columns,
-            fields=self.fields,
-            drjit_type=self.drjit_type,
-            static_dims=self.static_dims,
-        )
+        return replace(self, dtype=dtype)
 
     @classmethod
     def from_value(cls, value: Any) -> "TypeDesc":
@@ -128,10 +108,10 @@ class TypeDesc:
 
         Dispatches to appropriate adapter based on value type.
         """
-        module_root = type(value).__module__.split(".", 1)[0]
+        root = module_root(value)
         dispatch = cls._dispatch_table()
-        if module_root in dispatch:
-            return dispatch[module_root](value)
+        if root in dispatch:
+            return dispatch[root](value)
         if isinstance(value, (int, float, str, bool, bytes, type(None))):
             return cls(kind="class", fields=None)
         return cls._from_object(value)
@@ -171,38 +151,27 @@ class TypeDesc:
         return cls(kind="class", fields=fields or None)
 
     def make_sample(self) -> Any:
-        """
-        Create minimal instance with correct schema for inference-by-execution.
-
-        Returns a zero-sized or minimal array/dataframe that has the right
-        structure (dims, columns, dtype) but no actual data.
-
-        Note: For kind='dataframe' and 'series', this returns pandas objects
-        by default. Use make_polars_dataframe_sample/make_polars_series_sample
-        from the polars adapter for Polars objects.
-        """
-        if self.kind == "ndarray":
-            from typetrace.adapters.xarray import make_xarray_sample
-
-            return make_xarray_sample(self)
-        elif self.kind == "dataframe":
-            from typetrace.adapters.pandas import make_dataframe_sample
-
-            return make_dataframe_sample(self)
-        elif self.kind == "series":
-            from typetrace.adapters.pandas import make_series_sample
-
-            return make_series_sample(self)
-        elif self.kind == "columnar":
-            from typetrace.adapters.arrow import make_arrow_table_sample
-
-            return make_arrow_table_sample(self)
-        elif self.kind == "drjit":
-            from typetrace.adapters.drjit import make_drjit_sample
-
-            return make_drjit_sample(self)
-        else:
+        """Create minimal runtime sample preserving this descriptor schema."""
+        samples = self._sample_dispatch_table()
+        if self.kind not in samples:
             raise NotImplementedError(f"make_sample not implemented for kind={self.kind}")
+        return samples[self.kind](self)
+
+    @staticmethod
+    def _sample_dispatch_table() -> dict[str, Callable[["TypeDesc"], Any]]:
+        """Build sample-materialization dispatch table lazily."""
+        from typetrace.adapters.arrow import make_arrow_table_sample
+        from typetrace.adapters.drjit import make_drjit_sample
+        from typetrace.adapters.pandas import make_dataframe_sample, make_series_sample
+        from typetrace.adapters.xarray import make_xarray_sample
+
+        return {
+            "ndarray": make_xarray_sample,
+            "dataframe": make_dataframe_sample,
+            "series": make_series_sample,
+            "columnar": make_arrow_table_sample,
+            "drjit": make_drjit_sample,
+        }
 
     def field(self, name: str) -> "TypeDesc":
         """Get type descriptor for a field (opaque classes)."""
