@@ -66,7 +66,7 @@ class TypeDesc:
         static_dims: DrJit static dimensions baked into type
     """
 
-    kind: Literal["ndarray", "dataframe", "series", "columnar", "class", "drjit"]
+    kind: Literal["ndarray", "dataframe", "series", "columnar", "class", "drjit", "recursive"]
 
     # For ndarrays (xarray) - named dimensions
     dims: Dims | None = None
@@ -102,11 +102,12 @@ class TypeDesc:
         return replace(self, dtype=dtype)
 
     @classmethod
-    def from_value(cls, value: Any) -> "TypeDesc":
+    def from_value(cls, value: Any, *, _seen: set[int] | None = None) -> "TypeDesc":
         """
         Extract TypeDesc from a runtime value.
 
         Dispatches to appropriate adapter based on value type.
+        Tracks visited objects to prevent infinite recursion on cycles.
         """
         root = module_root(value)
         dispatch = cls._dispatch_table()
@@ -114,7 +115,7 @@ class TypeDesc:
             return dispatch[root](value)
         if isinstance(value, (int, float, str, bool, bytes, type(None))):
             return cls(kind="class", fields=None)
-        return cls._from_object(value)
+        return cls._from_object(value, _seen=_seen)
 
     @staticmethod
     def _dispatch_table() -> dict[str, Callable[[Any], "TypeDesc"]]:
@@ -135,8 +136,19 @@ class TypeDesc:
         }
 
     @classmethod
-    def _from_object(cls, value: Any) -> "TypeDesc":
-        """Extract TypeDesc from arbitrary Python object."""
+    def _from_object(cls, value: Any, *, _seen: set[int] | None = None) -> "TypeDesc":
+        """Extract TypeDesc from arbitrary Python object.
+
+        Tracks visited object ids to detect cycles and prevent infinite recursion.
+        """
+        if _seen is None:
+            _seen = set()
+
+        obj_id = id(value)
+        if obj_id in _seen:
+            return cls(kind="recursive")
+        _seen.add(obj_id)
+
         fields: dict[str, TypeDesc] = {}
         for name in dir(value):
             if name.startswith("_"):
@@ -147,7 +159,7 @@ class TypeDesc:
                 continue
             if callable(attr):
                 continue
-            fields[name] = cls.from_value(attr)
+            fields[name] = cls.from_value(attr, _seen=_seen)
         return cls(kind="class", fields=fields or None)
 
     def make_sample(self) -> Any:

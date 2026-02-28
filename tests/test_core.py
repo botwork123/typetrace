@@ -265,6 +265,72 @@ class TestTypeDescFromValue:
         assert list(result.fields.keys()) == ["value"]
         assert result.fields["value"] == TypeDesc(kind="class", fields=None)
 
+    def test_from_value_self_referencing_object(self) -> None:
+        """from_value handles objects that reference themselves without infinite recursion."""
+
+        class SelfRef:
+            def __init__(self):
+                self.me = self
+                self.value = 42
+
+        obj = SelfRef()
+        result = TypeDesc.from_value(obj)
+
+        assert result.kind == "class"
+        assert result.fields is not None
+        assert "value" in result.fields
+        # Self-reference should be detected and marked as recursive
+        assert "me" in result.fields
+        assert result.fields["me"].kind == "recursive"
+
+    def test_from_value_circular_reference(self) -> None:
+        """from_value handles circular references between objects."""
+
+        class A:
+            pass
+
+        class B:
+            pass
+
+        a = A()
+        b = B()
+        a.other = b
+        b.other = a
+
+        result = TypeDesc.from_value(a)
+
+        assert result.kind == "class"
+        assert result.fields is not None
+        assert "other" in result.fields
+        # B should be extracted, with its reference back to A marked as recursive
+        b_desc = result.fields["other"]
+        assert b_desc.kind == "class"
+        assert b_desc.fields is not None
+        assert "other" in b_desc.fields
+        assert b_desc.fields["other"].kind == "recursive"
+
+    def test_from_value_deep_nesting_no_cycle(self) -> None:
+        """from_value handles deep nesting without cycles (no false positive recursion)."""
+
+        class Node:
+            def __init__(self, val, child=None):
+                self.val = val
+                self.child = child
+
+        # Deep but no cycle
+        deep = Node(1, Node(2, Node(3, Node(4, Node(5)))))
+        result = TypeDesc.from_value(deep)
+
+        assert result.kind == "class"
+        # Should traverse all levels without marking anything as recursive
+        current = result
+        for _ in range(5):
+            assert current.kind == "class"
+            assert current.fields is not None
+            assert "val" in current.fields
+            if current.fields.get("child") and current.fields["child"].fields:
+                current = current.fields["child"]
+
 
 class TestTypeDescMakeSample:
     """Tests for TypeDesc.make_sample method."""
