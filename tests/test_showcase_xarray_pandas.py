@@ -4,6 +4,7 @@ from importlib.util import find_spec
 
 import pytest
 import yaml
+
 from typetrace.core import TypeDesc
 from typetrace.inference import infer_by_execution
 
@@ -54,9 +55,11 @@ def test_paired_recipes_present(concept: str, expected_ids: list[str]) -> None:
             {"time": 6},
         ),
         (
-            lambda da: da.isel(asset=[0, 1])
-            .rename(asset="scenario")
-            .assign_coords(scenario=["base", "alt"]),
+            lambda da: (
+                da.isel(asset=[0, 1])
+                .rename(asset="scenario")
+                .assign_coords(scenario=["base", "alt"])
+            ),
             TypeDesc(kind="ndarray", dims={"time": 5, "asset": 3}, dtype="float64"),
             {"time": 5, "scenario": 2},
         ),
@@ -76,11 +79,15 @@ def test_infer_by_execution_xarray_showcase(
     [
         (
             lambda df: (
-                df["ret"]
-                * df.index.get_level_values("asset").map({"A000": 0.6, "A001": 0.4, "A002": 0.0})
-            )
-            .groupby(level="time")
-            .sum(),
+                (
+                    df["ret"]
+                    * df.index.get_level_values("asset").map(
+                        {"A000": 0.6, "A001": 0.4, "A002": 0.0}
+                    )
+                )
+                .groupby(level="time")
+                .sum()
+            ),
             TypeDesc(
                 kind="dataframe",
                 columns=["ret"],
@@ -91,10 +98,12 @@ def test_infer_by_execution_xarray_showcase(
             {"time": 4},
         ),
         (
-            lambda df: df.groupby(level="asset")
-            .apply(lambda g: g["ret"].rolling(3).cov(g["mkt"]))
-            .droplevel(0)
-            .to_frame("beta"),
+            lambda df: (
+                df.groupby(level="asset")
+                .apply(lambda g: g["ret"].rolling(3).cov(g["mkt"]))
+                .droplevel(0)
+                .to_frame("beta")
+            ),
             TypeDesc(
                 kind="dataframe",
                 columns=["ret", "mkt"],

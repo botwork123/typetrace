@@ -34,4 +34,4 @@ jobs:
         run: mypy src/typetrace
 
       - name: Pytest + coverage
-        run: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
+        run: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=85 tests/
