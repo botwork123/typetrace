@@ -253,7 +253,11 @@ class TypeDesc:
         )
 
     @staticmethod
-    def _kind_for_type(concrete_type: type) -> Literal["ndarray", "dataset", "dataframe", "series", "columnar", "class", "drjit", "recursive"]:
+    def _kind_for_type(
+        concrete_type: type,
+    ) -> Literal[
+        "ndarray", "dataset", "dataframe", "series", "columnar", "class", "drjit", "recursive"
+    ]:
         """Map Python type to TypeDesc kind.
 
         Supports:
