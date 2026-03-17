@@ -231,7 +231,7 @@ class TestXarrayAdapter:
         )
         result = from_xarray(ds)
 
-        assert result.kind == "class"
+        assert result.kind == "dataset"
         assert "temp" in result.fields
         assert "pressure" in result.fields
         assert result.fields["temp"].dims == {"x": 10, "y": 20}

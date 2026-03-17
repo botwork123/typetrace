@@ -66,7 +66,9 @@ class TypeDesc:
         static_dims: DrJit static dimensions baked into type
     """
 
-    kind: Literal["ndarray", "dataframe", "series", "columnar", "class", "drjit", "recursive"]
+    kind: Literal[
+        "ndarray", "dataset", "dataframe", "series", "columnar", "class", "drjit", "recursive"
+    ]
 
     # For ndarrays (xarray) - named dimensions
     dims: Dims | None = None
@@ -175,10 +177,11 @@ class TypeDesc:
         from typetrace.adapters.arrow import make_arrow_table_sample
         from typetrace.adapters.drjit import make_drjit_sample
         from typetrace.adapters.pandas import make_dataframe_sample, make_series_sample
-        from typetrace.adapters.xarray import make_xarray_sample
+        from typetrace.adapters.xarray import make_dataset_sample, make_xarray_sample
 
         return {
             "ndarray": make_xarray_sample,
+            "dataset": make_dataset_sample,
             "dataframe": make_dataframe_sample,
             "series": make_series_sample,
             "columnar": make_arrow_table_sample,
@@ -192,3 +195,109 @@ class TypeDesc:
         if name not in self.fields:
             raise KeyError(f"Field {name!r} not found in {list(self.fields.keys())}")
         return self.fields[name]
+
+    @classmethod
+    def for_type(
+        cls,
+        concrete_type: type,
+        *,
+        dtype: str | None = None,
+        dims: Dims | None = None,
+        shape: tuple[DimValue, ...] | None = None,
+        columns: list[str] | None = None,
+        dtypes: dict[str, str] | None = None,
+        index: Dims | None = None,
+        fields: dict[str, "TypeDesc"] | None = None,
+        drjit_type: type | None = None,
+        static_dims: tuple[int, ...] | None = None,
+    ) -> "TypeDesc":
+        """Create TypeDesc by inferring kind from concrete_type.
+
+        This is the preferred way to create TypeDesc when you know the
+        Python type. The kind is automatically derived from the type.
+
+        Args:
+            concrete_type: Python type (xr.DataArray, pd.DataFrame, etc.)
+            dtype: Element dtype (e.g., "float64")
+            dims: Named dimensions for ndarrays
+            shape: Positional dimensions for DrJit/numpy
+            columns: Column names for dataframes
+            dtypes: Per-column dtypes for dataframes
+            index: Index dimensions for pandas
+            fields: Nested TypeDescs for opaque classes
+            drjit_type: Actual DrJit type for codegen
+            static_dims: DrJit static dimensions
+
+        Returns:
+            TypeDesc with kind inferred from concrete_type
+
+        Examples:
+            >>> TypeDesc.for_type(xr.DataArray, dtype="float64", dims={"x": 10})
+            TypeDesc(kind='ndarray', dtype='float64', dims={'x': 10}, ...)
+
+            >>> TypeDesc.for_type(pd.DataFrame, columns=["a", "b"])
+            TypeDesc(kind='dataframe', columns=['a', 'b'], ...)
+        """
+        kind = cls._kind_for_type(concrete_type)
+        return cls(
+            kind=kind,
+            dtype=dtype,
+            dims=dims,
+            shape=shape,
+            columns=columns,
+            dtypes=dtypes,
+            index=index,
+            fields=fields,
+            drjit_type=drjit_type,
+            static_dims=static_dims,
+        )
+
+    @staticmethod
+    def _kind_for_type(concrete_type: type) -> str:
+        """Map Python type to TypeDesc kind.
+
+        Supports:
+        - xarray: DataArray, Dataset → "ndarray"
+        - numpy: ndarray → "ndarray"
+        - pandas: DataFrame → "dataframe", Series → "series"
+        - polars: DataFrame → "dataframe", Series → "series"
+        - pyarrow: Table → "columnar"
+        - drjit: any dr.* array type → "drjit"
+        """
+        module_root = concrete_type.__module__.split(".")[0]
+
+        # xarray types
+        if module_root == "xarray":
+            if concrete_type.__name__ == "DataArray":
+                return "ndarray"
+            if concrete_type.__name__ == "Dataset":
+                return "dataset"
+
+        # numpy
+        if module_root == "numpy" and concrete_type.__name__ == "ndarray":
+            return "ndarray"
+
+        # pandas
+        if module_root == "pandas":
+            if concrete_type.__name__ == "DataFrame":
+                return "dataframe"
+            if concrete_type.__name__ == "Series":
+                return "series"
+
+        # polars
+        if module_root == "polars":
+            if concrete_type.__name__ == "DataFrame":
+                return "dataframe"
+            if concrete_type.__name__ == "Series":
+                return "series"
+
+        # pyarrow
+        if module_root == "pyarrow" and concrete_type.__name__ == "Table":
+            return "columnar"
+
+        # drjit - any type from drjit module
+        if module_root == "drjit":
+            return "drjit"
+
+        # Fallback to class for unknown types
+        return "class"
