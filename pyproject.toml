@@ -81,3 +81,9 @@ no_implicit_optional = true
 check_untyped_defs = true
 ignore_missing_imports = true
 exclude = ["src/typetrace/adapters/drjit.py"]
+
+# drjit has broken stubs under py310 in CI; skip static analysis for this dependency.
+[[tool.mypy.overrides]]
+module = ["drjit", "drjit.*"]
+follow_imports = "skip"
+ignore_errors = true
