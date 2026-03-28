@@ -2,14 +2,18 @@
 
 import pytest
 
-from typetrace.core import Symbol
+from typetrace.core import Symbol, TypeDesc
 from typetrace.patterns import (
     DimMismatch,
     add_dim,
+    apply_binary,
+    apply_unary,
+    binary_result_dtype,
     bind_symbols,
     broadcast,
     promote_dtype,
     reduce_dim,
+    unary_result_dtype,
     unify,
 )
 
@@ -151,3 +155,159 @@ class TestBindSymbols:
     def test_bind_symbols(self, dims, bindings, expected):
         """bind_symbols replaces symbols with bound values."""
         assert bind_symbols(dims, bindings) == expected
+
+
+class TestBinaryResultDtype:
+    """Tests for binary_result_dtype function."""
+
+    @pytest.mark.parametrize(
+        "left_dtype,right_dtype,operation,expected",
+        [
+            # Comparison ops → bool
+            ("float64", "float64", "eq", "bool"),
+            ("int32", "float64", "eq", "bool"),
+            ("float64", "int32", "ne", "bool"),
+            ("float64", "float64", "lt", "bool"),
+            ("float64", "float64", "le", "bool"),
+            ("float64", "float64", "gt", "bool"),
+            ("float64", "float64", "ge", "bool"),
+            # Symbolic comparison ops
+            ("float64", "float64", "==", "bool"),
+            ("float64", "float64", "!=", "bool"),
+            ("float64", "float64", "<", "bool"),
+            ("float64", "float64", "<=", "bool"),
+            ("float64", "float64", ">", "bool"),
+            ("float64", "float64", ">=", "bool"),
+            # True division → float64
+            ("int32", "int32", "truediv", "float64"),
+            ("float32", "int32", "truediv", "float64"),
+            ("int64", "int64", "/", "float64"),
+            # Floor division → int64
+            ("float64", "float64", "floordiv", "int64"),
+            ("int32", "int32", "//", "int64"),
+            # Arithmetic ops → promoted dtype
+            ("float64", "float64", "add", "float64"),
+            ("float32", "float64", "add", "float64"),
+            ("int32", "float32", "mul", "float32"),
+            ("int32", "int64", "sub", "int64"),
+            ("float64", "float64", "pow", "float64"),
+            ("float64", "float64", "mod", "float64"),
+            # None handling
+            (None, "float64", "add", "float64"),
+            ("float64", None, "add", "float64"),
+            (None, None, "add", None),
+            (None, None, "eq", "bool"),  # Comparison still returns bool
+        ],
+    )
+    def test_binary_result_dtype(self, left_dtype, right_dtype, operation, expected):
+        """binary_result_dtype computes correct output dtype."""
+        assert binary_result_dtype(left_dtype, right_dtype, operation) == expected
+
+
+class TestUnaryResultDtype:
+    """Tests for unary_result_dtype function."""
+
+    @pytest.mark.parametrize(
+        "input_dtype,operation,expected",
+        [
+            # Bool result ops
+            ("float64", "not", "bool"),
+            ("int32", "not", "bool"),
+            ("float64", "isnan", "bool"),
+            ("float64", "isinf", "bool"),
+            ("float64", "isfinite", "bool"),
+            # Complex to real
+            ("complex128", "abs", "float64"),
+            ("complex64", "abs", "float32"),
+            ("float64", "abs", "float64"),  # Non-complex preserved
+            ("complex128", "real", "float64"),
+            ("complex128", "imag", "float64"),
+            # Sign returns int
+            ("float64", "sign", "int64"),
+            ("int32", "sign", "int64"),
+            # Preserve dtype (neg, pos, exp, log, etc.)
+            ("float64", "neg", "float64"),
+            ("float32", "neg", "float32"),
+            ("int64", "neg", "int64"),
+            ("float64", "pos", "float64"),
+            ("float64", "exp", "float64"),
+            ("float64", "log", "float64"),
+            ("float64", "sqrt", "float64"),
+            # None passthrough
+            (None, "neg", None),
+            (None, "not", "bool"),  # Still returns bool
+        ],
+    )
+    def test_unary_result_dtype(self, input_dtype, operation, expected):
+        """unary_result_dtype computes correct output dtype."""
+        assert unary_result_dtype(input_dtype, operation) == expected
+
+
+class TestApplyUnary:
+    """Tests for apply_unary function (full TypeDesc transform)."""
+
+    @pytest.mark.parametrize(
+        "kind,dims,dtype,operation,expected_dtype",
+        [
+            # Negation preserves everything
+            ("DataArray", {"x": 10}, "float64", "neg", "float64"),
+            # Not returns bool
+            ("DataArray", {"x": 10, "y": 5}, "float64", "not", "bool"),
+            # Abs on complex
+            ("ndarray", {"x": 10}, "complex128", "abs", "float64"),
+            # Sign returns int
+            ("DataArray", {"x": 10}, "float64", "sign", "int64"),
+        ],
+    )
+    def test_apply_unary(self, kind, dims, dtype, operation, expected_dtype):
+        """apply_unary transforms full TypeDesc correctly."""
+        td = TypeDesc(kind=kind, dims=dims, dtype=dtype)
+        result = apply_unary(td, operation)
+
+        assert result.kind == kind  # Kind preserved
+        assert result.dims == dims  # Dims preserved
+        assert result.dtype == expected_dtype
+
+
+class TestApplyBinary:
+    """Tests for apply_binary function (full TypeDesc transform)."""
+
+    @pytest.mark.parametrize(
+        "left_dims,right_dims,left_dtype,right_dtype,operation,expected_dims,expected_dtype",
+        [
+            # Add with broadcasting
+            ({"x": 10}, {"y": 5}, "float64", "float64", "add", {"x": 10, "y": 5}, "float64"),
+            # Comparison returns bool
+            ({"x": 10}, {"x": 10}, "float64", "int32", "eq", {"x": 10}, "bool"),
+            # Division returns float
+            ({"x": 10}, {"x": 10}, "int32", "int32", "truediv", {"x": 10}, "float64"),
+            # Promotion
+            ({"x": 10}, {"y": 5}, "float32", "float64", "mul", {"x": 10, "y": 5}, "float64"),
+        ],
+    )
+    def test_apply_binary(
+        self,
+        left_dims,
+        right_dims,
+        left_dtype,
+        right_dtype,
+        operation,
+        expected_dims,
+        expected_dtype,
+    ):
+        """apply_binary transforms full TypeDesc correctly."""
+        left = TypeDesc(kind="DataArray", dims=left_dims, dtype=left_dtype)
+        right = TypeDesc(kind="DataArray", dims=right_dims, dtype=right_dtype)
+        result = apply_binary(left, right, operation)
+
+        assert result.kind == "DataArray"  # Kind follows left
+        assert result.dims == expected_dims
+        assert result.dtype == expected_dtype
+
+    def test_apply_binary_kind_from_left(self):
+        """apply_binary takes kind from left operand."""
+        left = TypeDesc(kind="DataArray", dims={"x": 10}, dtype="float64")
+        right = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        result = apply_binary(left, right, "add")
+
+        assert result.kind == "DataArray"  # From left

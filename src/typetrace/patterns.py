@@ -5,7 +5,14 @@ These are reusable building blocks for type_transform implementations.
 Most calcs use one of these patterns, so we avoid duplicating logic.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from typetrace.core import Dims, DimValue, Symbol
+
+if TYPE_CHECKING:
+    from typetrace.core import TypeDesc
 
 
 class DimMismatch(Exception):
@@ -160,3 +167,165 @@ def bind_symbols(d: Dims | None, bindings: dict[str, int]) -> Dims:
         else:
             result[name] = size
     return result
+
+
+# =============================================================================
+# Unary operation type transforms
+# =============================================================================
+
+# Operations that always return bool
+_BOOL_RESULT_OPS = frozenset({"not", "isnan", "isinf", "isfinite"})
+
+# Operations that convert complex to real
+_COMPLEX_TO_REAL_OPS = frozenset({"abs", "real", "imag"})
+
+# Operations that return int (sign, comparison results in some contexts)
+_INT_RESULT_OPS = frozenset({"sign"})
+
+
+# =============================================================================
+# Binary operation type transforms
+# =============================================================================
+
+# Comparison operations always return bool
+_COMPARISON_OPS = frozenset(
+    {
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "==",
+        "!=",
+        "<",
+        "<=",
+        ">",
+        ">=",
+    }
+)
+
+# True division always returns float
+_FLOAT_RESULT_OPS = frozenset({"truediv", "/"})
+
+# Floor division returns int
+_INT_RESULT_OPS_BINARY = frozenset({"floordiv", "//"})
+
+
+def binary_result_dtype(
+    left_dtype: str | None,
+    right_dtype: str | None,
+    operation: str,
+) -> str | None:
+    """
+    Compute result dtype for a binary operation.
+
+    Type rules:
+    - Comparisons (eq, ne, lt, le, gt, ge) → bool
+    - True division (/) → float64
+    - Floor division (//) → int64
+    - Other ops → promote_dtype(left, right)
+
+    Args:
+        left_dtype: Left operand dtype
+        right_dtype: Right operand dtype
+        operation: Operation name (e.g., "add", "eq", "truediv")
+
+    Returns:
+        Result dtype
+    """
+    if operation in _COMPARISON_OPS:
+        return "bool"
+
+    if operation in _FLOAT_RESULT_OPS:
+        # Division always produces float
+        return "float64"
+
+    if operation in _INT_RESULT_OPS_BINARY:
+        return "int64"
+
+    # Default: promote both operand types
+    return promote_dtype(left_dtype, right_dtype)
+
+
+def unary_result_dtype(input_dtype: str | None, operation: str) -> str | None:
+    """
+    Compute result dtype for a unary operation.
+
+    Type rules:
+    - not, isnan, isinf, isfinite → bool
+    - abs on complex → float64
+    - sign → int64
+    - neg, pos, exp, log, sqrt, etc. → preserve dtype
+
+    Args:
+        input_dtype: Input dtype (e.g., "float64", "complex128")
+        operation: Operation name (e.g., "neg", "abs", "not")
+
+    Returns:
+        Result dtype
+    """
+    if operation in _BOOL_RESULT_OPS:
+        return "bool"
+
+    if operation in _INT_RESULT_OPS:
+        return "int64"
+
+    if operation in _COMPLEX_TO_REAL_OPS:
+        if input_dtype and "complex" in input_dtype:
+            # complex64 → float32, complex128 → float64
+            return "float32" if input_dtype == "complex64" else "float64"
+
+    # Default: preserve dtype
+    return input_dtype
+
+
+# =============================================================================
+# Full TypeDesc transforms (convenience API)
+# =============================================================================
+
+
+def apply_unary(td: TypeDesc, operation: str) -> TypeDesc:
+    """
+    Apply unary operation type transform to a TypeDesc.
+
+    Preserves kind and dims, transforms dtype according to operation rules.
+
+    Args:
+        td: Input TypeDesc
+        operation: Operation name (e.g., "neg", "abs", "not")
+
+    Returns:
+        New TypeDesc with transformed dtype
+    """
+    new_dtype = unary_result_dtype(td.dtype, operation)
+    if new_dtype is None or new_dtype == td.dtype:
+        return td
+    return td.with_dtype(new_dtype)
+
+
+def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
+    """
+    Apply binary operation type transform to two TypeDescs.
+
+    Broadcasts dims (xarray-style union), transforms dtype according to
+    operation rules. Result kind follows left operand.
+
+    Args:
+        left: Left operand TypeDesc
+        right: Right operand TypeDesc
+        operation: Operation name (e.g., "add", "eq", "truediv")
+
+    Returns:
+        New TypeDesc with broadcasted dims and transformed dtype
+    """
+    from typetrace.core import TypeDesc as TD  # noqa: PLC0415
+
+    new_dims = broadcast(left.dims, right.dims)
+    new_dtype = binary_result_dtype(left.dtype, right.dtype, operation)
+
+    return TD(
+        kind=left.kind,
+        dims=new_dims,
+        dtype=new_dtype,
+    )
