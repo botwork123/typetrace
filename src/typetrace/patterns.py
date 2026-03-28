@@ -299,7 +299,9 @@ def apply_unary(td: TypeDesc, operation: str) -> TypeDesc:
         New TypeDesc with transformed dtype
     """
     new_dtype = unary_result_dtype(td.dtype, operation)
-    return td.with_dtype(new_dtype) if new_dtype != td.dtype else td
+    if new_dtype is None or new_dtype == td.dtype:
+        return td
+    return td.with_dtype(new_dtype)
 
 
 def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
