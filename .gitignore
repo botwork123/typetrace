@@ -43,3 +43,4 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+.build-venv/
