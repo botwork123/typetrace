@@ -5,7 +5,14 @@ These are reusable building blocks for type_transform implementations.
 Most calcs use one of these patterns, so we avoid duplicating logic.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from typetrace.core import Dims, DimValue, Symbol
+
+if TYPE_CHECKING:
+    from typetrace.core import TypeDesc
 
 
 class DimMismatch(Exception):
@@ -271,3 +278,52 @@ def unary_result_dtype(input_dtype: str | None, operation: str) -> str | None:
 
     # Default: preserve dtype
     return input_dtype
+
+
+# =============================================================================
+# Full TypeDesc transforms (convenience API)
+# =============================================================================
+
+
+def apply_unary(td: TypeDesc, operation: str) -> TypeDesc:
+    """
+    Apply unary operation type transform to a TypeDesc.
+
+    Preserves kind and dims, transforms dtype according to operation rules.
+
+    Args:
+        td: Input TypeDesc
+        operation: Operation name (e.g., "neg", "abs", "not")
+
+    Returns:
+        New TypeDesc with transformed dtype
+    """
+    new_dtype = unary_result_dtype(td.dtype, operation)
+    return td.with_dtype(new_dtype) if new_dtype != td.dtype else td
+
+
+def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
+    """
+    Apply binary operation type transform to two TypeDescs.
+
+    Broadcasts dims (xarray-style union), transforms dtype according to
+    operation rules. Result kind follows left operand.
+
+    Args:
+        left: Left operand TypeDesc
+        right: Right operand TypeDesc
+        operation: Operation name (e.g., "add", "eq", "truediv")
+
+    Returns:
+        New TypeDesc with broadcasted dims and transformed dtype
+    """
+    from typetrace.core import TypeDesc as TD  # noqa: PLC0415
+
+    new_dims = broadcast(left.dims, right.dims)
+    new_dtype = binary_result_dtype(left.dtype, right.dtype, operation)
+
+    return TD(
+        kind=left.kind,
+        dims=new_dims,
+        dtype=new_dtype,
+    )

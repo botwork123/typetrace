@@ -2,10 +2,12 @@
 
 import pytest
 
-from typetrace.core import Symbol
+from typetrace.core import Symbol, TypeDesc
 from typetrace.patterns import (
     DimMismatch,
     add_dim,
+    apply_binary,
+    apply_unary,
     binary_result_dtype,
     bind_symbols,
     broadcast,
@@ -239,3 +241,73 @@ class TestUnaryResultDtype:
     def test_unary_result_dtype(self, input_dtype, operation, expected):
         """unary_result_dtype computes correct output dtype."""
         assert unary_result_dtype(input_dtype, operation) == expected
+
+
+class TestApplyUnary:
+    """Tests for apply_unary function (full TypeDesc transform)."""
+
+    @pytest.mark.parametrize(
+        "kind,dims,dtype,operation,expected_dtype",
+        [
+            # Negation preserves everything
+            ("DataArray", {"x": 10}, "float64", "neg", "float64"),
+            # Not returns bool
+            ("DataArray", {"x": 10, "y": 5}, "float64", "not", "bool"),
+            # Abs on complex
+            ("ndarray", {"x": 10}, "complex128", "abs", "float64"),
+            # Sign returns int
+            ("DataArray", {"x": 10}, "float64", "sign", "int64"),
+        ],
+    )
+    def test_apply_unary(self, kind, dims, dtype, operation, expected_dtype):
+        """apply_unary transforms full TypeDesc correctly."""
+        td = TypeDesc(kind=kind, dims=dims, dtype=dtype)
+        result = apply_unary(td, operation)
+
+        assert result.kind == kind  # Kind preserved
+        assert result.dims == dims  # Dims preserved
+        assert result.dtype == expected_dtype
+
+
+class TestApplyBinary:
+    """Tests for apply_binary function (full TypeDesc transform)."""
+
+    @pytest.mark.parametrize(
+        "left_dims,right_dims,left_dtype,right_dtype,operation,expected_dims,expected_dtype",
+        [
+            # Add with broadcasting
+            ({"x": 10}, {"y": 5}, "float64", "float64", "add", {"x": 10, "y": 5}, "float64"),
+            # Comparison returns bool
+            ({"x": 10}, {"x": 10}, "float64", "int32", "eq", {"x": 10}, "bool"),
+            # Division returns float
+            ({"x": 10}, {"x": 10}, "int32", "int32", "truediv", {"x": 10}, "float64"),
+            # Promotion
+            ({"x": 10}, {"y": 5}, "float32", "float64", "mul", {"x": 10, "y": 5}, "float64"),
+        ],
+    )
+    def test_apply_binary(
+        self,
+        left_dims,
+        right_dims,
+        left_dtype,
+        right_dtype,
+        operation,
+        expected_dims,
+        expected_dtype,
+    ):
+        """apply_binary transforms full TypeDesc correctly."""
+        left = TypeDesc(kind="DataArray", dims=left_dims, dtype=left_dtype)
+        right = TypeDesc(kind="DataArray", dims=right_dims, dtype=right_dtype)
+        result = apply_binary(left, right, operation)
+
+        assert result.kind == "DataArray"  # Kind follows left
+        assert result.dims == expected_dims
+        assert result.dtype == expected_dtype
+
+    def test_apply_binary_kind_from_left(self):
+        """apply_binary takes kind from left operand."""
+        left = TypeDesc(kind="DataArray", dims={"x": 10}, dtype="float64")
+        right = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        result = apply_binary(left, right, "add")
+
+        assert result.kind == "DataArray"  # From left
