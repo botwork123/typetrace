@@ -1,15 +1,16 @@
 """Tests for typetrace.patterns module."""
 
 import pytest
-
 from typetrace.core import Symbol
 from typetrace.patterns import (
     DimMismatch,
     add_dim,
+    binary_result_dtype,
     bind_symbols,
     broadcast,
     promote_dtype,
     reduce_dim,
+    unary_result_dtype,
     unify,
 )
 
@@ -151,3 +152,89 @@ class TestBindSymbols:
     def test_bind_symbols(self, dims, bindings, expected):
         """bind_symbols replaces symbols with bound values."""
         assert bind_symbols(dims, bindings) == expected
+
+
+class TestBinaryResultDtype:
+    """Tests for binary_result_dtype function."""
+
+    @pytest.mark.parametrize(
+        "left_dtype,right_dtype,operation,expected",
+        [
+            # Comparison ops → bool
+            ("float64", "float64", "eq", "bool"),
+            ("int32", "float64", "eq", "bool"),
+            ("float64", "int32", "ne", "bool"),
+            ("float64", "float64", "lt", "bool"),
+            ("float64", "float64", "le", "bool"),
+            ("float64", "float64", "gt", "bool"),
+            ("float64", "float64", "ge", "bool"),
+            # Symbolic comparison ops
+            ("float64", "float64", "==", "bool"),
+            ("float64", "float64", "!=", "bool"),
+            ("float64", "float64", "<", "bool"),
+            ("float64", "float64", "<=", "bool"),
+            ("float64", "float64", ">", "bool"),
+            ("float64", "float64", ">=", "bool"),
+            # True division → float64
+            ("int32", "int32", "truediv", "float64"),
+            ("float32", "int32", "truediv", "float64"),
+            ("int64", "int64", "/", "float64"),
+            # Floor division → int64
+            ("float64", "float64", "floordiv", "int64"),
+            ("int32", "int32", "//", "int64"),
+            # Arithmetic ops → promoted dtype
+            ("float64", "float64", "add", "float64"),
+            ("float32", "float64", "add", "float64"),
+            ("int32", "float32", "mul", "float32"),
+            ("int32", "int64", "sub", "int64"),
+            ("float64", "float64", "pow", "float64"),
+            ("float64", "float64", "mod", "float64"),
+            # None handling
+            (None, "float64", "add", "float64"),
+            ("float64", None, "add", "float64"),
+            (None, None, "add", None),
+            (None, None, "eq", "bool"),  # Comparison still returns bool
+        ],
+    )
+    def test_binary_result_dtype(self, left_dtype, right_dtype, operation, expected):
+        """binary_result_dtype computes correct output dtype."""
+        assert binary_result_dtype(left_dtype, right_dtype, operation) == expected
+
+
+class TestUnaryResultDtype:
+    """Tests for unary_result_dtype function."""
+
+    @pytest.mark.parametrize(
+        "input_dtype,operation,expected",
+        [
+            # Bool result ops
+            ("float64", "not", "bool"),
+            ("int32", "not", "bool"),
+            ("float64", "isnan", "bool"),
+            ("float64", "isinf", "bool"),
+            ("float64", "isfinite", "bool"),
+            # Complex to real
+            ("complex128", "abs", "float64"),
+            ("complex64", "abs", "float32"),
+            ("float64", "abs", "float64"),  # Non-complex preserved
+            ("complex128", "real", "float64"),
+            ("complex128", "imag", "float64"),
+            # Sign returns int
+            ("float64", "sign", "int64"),
+            ("int32", "sign", "int64"),
+            # Preserve dtype (neg, pos, exp, log, etc.)
+            ("float64", "neg", "float64"),
+            ("float32", "neg", "float32"),
+            ("int64", "neg", "int64"),
+            ("float64", "pos", "float64"),
+            ("float64", "exp", "float64"),
+            ("float64", "log", "float64"),
+            ("float64", "sqrt", "float64"),
+            # None passthrough
+            (None, "neg", None),
+            (None, "not", "bool"),  # Still returns bool
+        ],
+    )
+    def test_unary_result_dtype(self, input_dtype, operation, expected):
+        """unary_result_dtype computes correct output dtype."""
+        assert unary_result_dtype(input_dtype, operation) == expected
