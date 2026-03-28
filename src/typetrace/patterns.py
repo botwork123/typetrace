@@ -181,10 +181,22 @@ _INT_RESULT_OPS = frozenset({"sign"})
 # =============================================================================
 
 # Comparison operations always return bool
-_COMPARISON_OPS = frozenset({
-    "eq", "ne", "lt", "le", "gt", "ge",
-    "==", "!=", "<", "<=", ">", ">=",
-})
+_COMPARISON_OPS = frozenset(
+    {
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "==",
+        "!=",
+        "<",
+        "<=",
+        ">",
+        ">=",
+    }
+)
 
 # True division always returns float
 _FLOAT_RESULT_OPS = frozenset({"truediv", "/"})
