@@ -28,9 +28,9 @@ fi
 
 # Single-path install (no fallback): install project + dev extras from this branch,
 # then install package without dependencies for parity with strict CI bootstrap checks.
-# Install full test dependency set (dev + adapter extras) so adapter tests run, not skip.
-uv pip install --python "$VENV_PY" -c "$CONSTRAINTS_FILE" '.[dev,all]'
-uv pip install --python "$VENV_PY" -c "$CONSTRAINTS_FILE" . --no-deps
+# Install full test dependency set (dev + adapter extras) in editable mode so
+# coverage maps to src/ and adapter tests run (no skip-by-missing-deps).
+uv pip install --python "$VENV_PY" -c "$CONSTRAINTS_FILE" -e '.[dev,all]'
 
 # CI tools lane (explicit): avoid relying on optional extras implicitly containing these.
 uv pip install --python "$VENV_PY" -c "$CONSTRAINTS_FILE" \
