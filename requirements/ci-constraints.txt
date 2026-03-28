@@ -1,0 +1,21 @@
+# CI-authoritative Python dependency contract (Phase A for issue #95).
+#
+# Policy:
+# - All CI pip installs MUST pass: `-c requirements/ci-constraints.txt`.
+# - Tools invoked directly by CI are pinned here for reproducibility.
+# - typetrace source/ref policy is pinned to Forgejo commit below.
+# - Bootstrap/worktree behavior changes are out of scope for this phase.
+
+# Directly-invoked CI tooling
+pre-commit==4.2.0
+ruff==0.14.0
+# NOTE: semgrep is intentionally left unconstrained in Phase A because
+# pinned builds have shown runner-architecture availability drift.
+# CI still installs semgrep explicitly in each job.
+mypy==1.15.0
+pytest==8.3.5
+pytest-cov==6.0.0
+
+# typetrace source/ref policy (used by CI clone/install steps)
+# Repository: http://pop-os.tail407302.ts.net:3000/botwork123/typetrace.git
+# Pinned ref: 7b0670648b174b1a3b325bfb0d7f0da3e2a07bbe
