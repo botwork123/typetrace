@@ -1,6 +1,7 @@
 """Tests for typetrace.patterns module."""
 
 import pytest
+
 from typetrace.core import Symbol
 from typetrace.patterns import (
     DimMismatch,
