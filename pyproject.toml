@@ -30,8 +30,8 @@ dependencies = []
 xarray = ["xarray", "numpy"]
 pandas = ["pandas"]
 drjit = ["drjit"]
-polars = ["polars"]
-all = ["xarray", "numpy", "pandas", "drjit", "polars"]
+polars = ["polars", "pyarrow"]
+all = ["xarray", "numpy", "pandas", "drjit", "polars", "pyarrow"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -41,6 +41,9 @@ dev = [
     "numpy",
     "xarray",
     "pandas",
+    "polars",
+    "pyarrow",
+    "drjit",
 ]
 
 [project.urls]
