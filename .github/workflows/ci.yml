@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  quality:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,5 +22,60 @@ jobs:
       - run: ./scripts/wt_bootstrap.sh
       - run: ./scripts/wt_run.sh ruff check .
       - run: ./scripts/wt_run.sh ruff format --check .
+
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - run: curl -LsSf https://astral.sh/uv/0.7.9/install.sh | sh
+      - run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - run: ./scripts/wt_bootstrap.sh
       - run: ./scripts/wt_run.sh mypy src/typetrace
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - run: curl -LsSf https://astral.sh/uv/0.7.9/install.sh | sh
+      - run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - run: ./scripts/wt_bootstrap.sh
       - run: ./scripts/wt_run.sh pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=85 tests/
+
+  report:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [lint, mypy, test]
+    steps:
+      - name: Lane summary
+        run: |
+          echo "lint: ${{ needs.lint.result }}"
+          echo "mypy: ${{ needs.mypy.result }}"
+          echo "test: ${{ needs.test.result }}"
+
+  protection_gate:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [lint, mypy, test, report]
+    steps:
+      - name: Fail if any required lane failed or was cancelled
+        run: |
+          lane_results="${{ needs.lint.result }} ${{ needs.mypy.result }} ${{ needs.test.result }}"
+          echo "lane_results=$lane_results"
+          for result in $lane_results; do
+            if [ "$result" != "success" ]; then
+              echo "Required lane did not succeed: $result" >&2
+              exit 1
+            fi
+          done
