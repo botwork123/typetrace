@@ -637,3 +637,153 @@ class TestDrJitAdapter:
         result = make_drjit_sample(t)
 
         assert type(result) is llvm.Int64
+
+
+class TestNumpyAdapter:
+    """Tests for numpy adapter."""
+
+    def test_from_numpy_1d(self) -> None:
+        """from_numpy extracts TypeDesc from 1D array."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy
+
+        arr = np.array([1, 2, 3, 4])
+        result = from_numpy(arr)
+
+        assert result.kind == "ndarray"
+        assert result.dims == {"dim_0": 4}
+        assert result.dtype == "int64"
+
+    def test_from_numpy_2d(self) -> None:
+        """from_numpy extracts TypeDesc from 2D array."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy
+
+        arr = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        result = from_numpy(arr)
+
+        assert result.kind == "ndarray"
+        assert result.dims == {"dim_0": 2, "dim_1": 3}
+        assert result.dtype == "float64"
+
+    def test_from_numpy_3d(self) -> None:
+        """from_numpy extracts TypeDesc from 3D array."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy
+
+        arr = np.zeros((4, 5, 6), dtype="int32")
+        result = from_numpy(arr)
+
+        assert result.kind == "ndarray"
+        assert result.dims == {"dim_0": 4, "dim_1": 5, "dim_2": 6}
+        assert result.dtype == "int32"
+
+    def test_from_numpy_dtype_bool(self) -> None:
+        """from_numpy preserves boolean dtype."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy
+
+        arr = np.array([True, False, True])
+        result = from_numpy(arr)
+
+        assert result.dtype == "bool"
+
+    def test_from_numpy_dtype_float32(self) -> None:
+        """from_numpy preserves float32 dtype."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy
+
+        arr = np.array([1.0, 2.0], dtype="float32")
+        result = from_numpy(arr)
+
+        assert result.dtype == "float32"
+
+    def test_from_numpy_rejects_non_ndarray(self) -> None:
+        """from_numpy raises TypeError for non-ndarray input."""
+        from typetrace.adapters.numpy import from_numpy
+
+        with pytest.raises(TypeError, match="Expected numpy.ndarray"):
+            from_numpy([1, 2, 3])
+
+    def test_make_numpy_sample_1d(self) -> None:
+        """make_numpy_sample creates 1D array."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="ndarray", dims={"dim_0": 8}, dtype="float64")
+        result = make_numpy_sample(t)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (8,)
+        assert result.dtype == np.dtype("float64")
+
+    def test_make_numpy_sample_2d(self) -> None:
+        """make_numpy_sample creates 2D array."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="ndarray", dims={"dim_0": 3, "dim_1": 4}, dtype="int32")
+        result = make_numpy_sample(t)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (3, 4)
+        assert result.dtype == np.dtype("int32")
+
+    def test_make_numpy_sample_default_dtype(self) -> None:
+        """make_numpy_sample defaults to float64."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="ndarray", dims={"dim_0": 5})
+        result = make_numpy_sample(t)
+
+        assert result.dtype == np.dtype("float64")
+
+    def test_make_numpy_sample_sequential_values(self) -> None:
+        """make_numpy_sample creates arrays with sequential values."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="ndarray", dims={"dim_0": 3, "dim_1": 2}, dtype="float64")
+        result = make_numpy_sample(t)
+
+        # Should contain sequential values 0, 1, 2, 3, 4, 5
+        expected = np.arange(6, dtype="float64").reshape(3, 2)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_make_numpy_sample_respects_sample_size_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """make_numpy_sample respects TYPETRACE_SAMPLE_SIZE environment variable."""
+        import numpy as np
+
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import Symbol, TypeDesc
+
+        monkeypatch.setenv("TYPETRACE_SAMPLE_SIZE", "10")
+
+        # Use Symbol to trigger sample size lookup
+        t = TypeDesc(kind="ndarray", dims={"dim_0": Symbol("N")}, dtype="float64")
+        result = make_numpy_sample(t)
+
+        assert result.shape[0] == 10
+
+    def test_make_numpy_sample_raises_without_dims(self) -> None:
+        """make_numpy_sample raises ValueError if dims is None."""
+        from typetrace.adapters.numpy import make_numpy_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="ndarray", dtype="float64")
+        with pytest.raises(ValueError, match="Cannot make numpy sample without dims"):
+            make_numpy_sample(t)

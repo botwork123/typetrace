@@ -364,3 +364,49 @@ class TestInferByExecution:
 
         assert result.kind == "dataframe"
         assert "new_col" in result.columns
+
+    def test_infer_by_execution_numpy_basic(self) -> None:
+        """infer_by_execution works with numpy arrays."""
+        import numpy as np
+
+        def double_array(arr: np.ndarray) -> np.ndarray:
+            return arr * 2
+
+        input_type = TypeDesc(kind="ndarray", dims={"dim_0": 10, "dim_1": 5}, dtype="float64")
+        result = infer_by_execution(double_array, input_type)
+
+        assert result.kind == "ndarray"
+        assert result.dtype == "float64"
+        assert "dim_0" in result.dims
+        assert "dim_1" in result.dims
+
+    def test_infer_by_execution_numpy_sum(self) -> None:
+        """infer_by_execution handles numpy reduction operations."""
+        import numpy as np
+
+        def array_sum(arr: np.ndarray) -> np.ndarray:
+            return np.sum(arr, axis=0)
+
+        # 2D array (10, 5)
+        input_type = TypeDesc(kind="ndarray", dims={"dim_0": 10, "dim_1": 5}, dtype="float64")
+        result = infer_by_execution(array_sum, input_type)
+
+        assert result.kind == "ndarray"
+        assert result.dtype == "float64"
+        # After summing along axis 0, we should have 1D output
+        assert result.dims == {"dim_0": 5}
+
+    def test_infer_by_execution_numpy_reshape(self) -> None:
+        """infer_by_execution handles numpy reshape operations."""
+        import numpy as np
+
+        def reshape_array(arr: np.ndarray) -> np.ndarray:
+            return arr.reshape(-1)
+
+        input_type = TypeDesc(kind="ndarray", dims={"dim_0": 4, "dim_1": 3}, dtype="int32")
+        result = infer_by_execution(reshape_array, input_type)
+
+        assert result.kind == "ndarray"
+        assert result.dtype == "int32"
+        # After flatten, should be 1D
+        assert len(result.dims) == 1

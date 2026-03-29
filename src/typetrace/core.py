@@ -125,6 +125,7 @@ class TypeDesc:
 
         from typetrace.adapters.arrow import from_arrow
         from typetrace.adapters.drjit import from_drjit
+        from typetrace.adapters.numpy import from_numpy
         from typetrace.adapters.pandas import from_pandas
         from typetrace.adapters.polars import from_polars
         from typetrace.adapters.xarray import from_xarray
@@ -135,6 +136,7 @@ class TypeDesc:
             "drjit": from_drjit,
             "polars": from_polars,
             "pyarrow": from_arrow,
+            "numpy": from_numpy,
         }
 
     @classmethod
@@ -166,6 +168,14 @@ class TypeDesc:
 
     def make_sample(self) -> Any:
         """Create minimal runtime sample preserving this descriptor schema."""
+        # Special handling for ndarray: detect numpy vs xarray based on dim names
+        if self.kind == "ndarray" and self.dims:
+            # If all dims have generic names (dim_0, dim_1, etc.), use numpy
+            dim_names = list(self.dims.keys())
+            if all(name.startswith("dim_") and name[4:].isdigit() for name in dim_names):
+                from typetrace.adapters.numpy import make_numpy_sample
+                return make_numpy_sample(self)
+        
         samples = self._sample_dispatch_table()
         if self.kind not in samples:
             raise NotImplementedError(f"make_sample not implemented for kind={self.kind}")
@@ -176,6 +186,7 @@ class TypeDesc:
         """Build sample-materialization dispatch table lazily."""
         from typetrace.adapters.arrow import make_arrow_table_sample
         from typetrace.adapters.drjit import make_drjit_sample
+        from typetrace.adapters.numpy import make_numpy_sample
         from typetrace.adapters.pandas import make_dataframe_sample, make_series_sample
         from typetrace.adapters.xarray import make_dataset_sample, make_xarray_sample
 
