@@ -67,7 +67,15 @@ class TypeDesc:
     """
 
     kind: Literal[
-        "ndarray", "dataset", "dataframe", "series", "columnar", "class", "drjit", "recursive"
+        "ndarray",
+        "dataset",
+        "dataframe",
+        "series",
+        "columnar",
+        "class",
+        "drjit",
+        "recursive",
+        "scalar",
     ]
 
     # For ndarrays (xarray) - named dimensions
@@ -110,13 +118,30 @@ class TypeDesc:
 
         Dispatches to appropriate adapter based on value type.
         Tracks visited objects to prevent infinite recursion on cycles.
+
+        Handles:
+        - Python scalars (int, float, str, bool) → TypeDesc(kind="scalar", dtype=...)
+        - numpy arrays → TypeDesc(kind="ndarray", dtype=..., dims={...})
+        - numpy scalars → TypeDesc(kind="scalar", dtype=...)
+        - xarray/pandas/polars/arrow/drjit → dispatched to adapters
+        - Other objects → introspected as class
         """
+        # Handle Python scalars first (before module dispatch)
+        if isinstance(value, bool):  # Must check before int since bool is subclass of int
+            return cls(kind="scalar", dtype="bool")
+        if isinstance(value, int):
+            return cls(kind="scalar", dtype="int64")
+        if isinstance(value, float):
+            return cls(kind="scalar", dtype="float64")
+        if isinstance(value, str):
+            return cls(kind="scalar", dtype="str")
+        if isinstance(value, (bytes, type(None))):
+            return cls(kind="class", fields=None)
+
         root = module_root(value)
         dispatch = cls._dispatch_table()
         if root in dispatch:
             return dispatch[root](value)
-        if isinstance(value, (int, float, str, bool, bytes, type(None))):
-            return cls(kind="class", fields=None)
         return cls._from_object(value, _seen=_seen)
 
     @staticmethod
@@ -125,6 +150,7 @@ class TypeDesc:
 
         from typetrace.adapters.arrow import from_arrow
         from typetrace.adapters.drjit import from_drjit
+        from typetrace.adapters.numpy import from_numpy
         from typetrace.adapters.pandas import from_pandas
         from typetrace.adapters.polars import from_polars
         from typetrace.adapters.xarray import from_xarray
@@ -135,6 +161,7 @@ class TypeDesc:
             "drjit": from_drjit,
             "polars": from_polars,
             "pyarrow": from_arrow,
+            "numpy": from_numpy,
         }
 
     @classmethod
@@ -256,7 +283,15 @@ class TypeDesc:
     def _kind_for_type(
         concrete_type: type,
     ) -> Literal[
-        "ndarray", "dataset", "dataframe", "series", "columnar", "class", "drjit", "recursive"
+        "ndarray",
+        "dataset",
+        "dataframe",
+        "series",
+        "columnar",
+        "class",
+        "drjit",
+        "recursive",
+        "scalar",
     ]:
         """Map Python type to TypeDesc kind.
 
