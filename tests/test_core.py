@@ -264,7 +264,7 @@ class TestTypeDescFromValue:
         assert result.kind == "class"
         assert result.fields is not None
         assert list(result.fields.keys()) == ["value"]
-        assert result.fields["value"] == TypeDesc(kind="class", fields=None)
+        assert result.fields["value"] == TypeDesc(kind="scalar", dtype="int64")
 
     def test_from_value_self_referencing_object(self) -> None:
         """from_value handles objects that reference themselves without infinite recursion."""
