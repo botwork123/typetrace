@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import pytest
+
 from typetrace.core import Symbol, TypeDesc
 from typetrace.inference import TypeContext, infer_by_execution, infer_types
 
