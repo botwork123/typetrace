@@ -2,136 +2,190 @@
 Static concrete type propagation for typetrace.
 
 Provides `concrete_transform()` to determine output types from operations
-without runtime execution. Registry-based approach for:
-- Method calls: (pd.DataFrame, "sum") → pd.Series
-- Binary ops: ((int, int), "truediv") → float
-- Unary ops: (int, "neg") → int
+without runtime execution. Uses general rules instead of lookup tables:
+- Comparison ops → bool
+- Division ops → float
+- Aggregation ops → reduce dimension
+- Type promotion for binary ops
 """
 
 from __future__ import annotations
 
-from typing import overload
+from typing import cast, overload
 
-# Method call rules: {(module_root, class_name, method): result_class_name}
-# None means scalar (no concrete type), "same" means same as input
-_METHOD_RULES: dict[tuple[str, str, str], str | None] = {
-    # pandas DataFrame aggregations → Series
-    ("pandas", "DataFrame", "sum"): "Series",
-    ("pandas", "DataFrame", "mean"): "Series",
-    ("pandas", "DataFrame", "std"): "Series",
-    ("pandas", "DataFrame", "var"): "Series",
-    ("pandas", "DataFrame", "min"): "Series",
-    ("pandas", "DataFrame", "max"): "Series",
-    ("pandas", "DataFrame", "count"): "Series",
-    ("pandas", "DataFrame", "median"): "Series",
-    ("pandas", "DataFrame", "prod"): "Series",
-    # pandas Series aggregations → scalar
-    ("pandas", "Series", "sum"): None,
-    ("pandas", "Series", "mean"): None,
-    ("pandas", "Series", "std"): None,
-    ("pandas", "Series", "var"): None,
-    ("pandas", "Series", "min"): None,
-    ("pandas", "Series", "max"): None,
-    ("pandas", "Series", "count"): None,
-    ("pandas", "Series", "median"): None,
-    ("pandas", "Series", "prod"): None,
-    # dask DataFrame → pandas DataFrame
-    ("dask", "DataFrame", "head"): "pandas.DataFrame",
-    ("dask", "DataFrame", "compute"): "pandas.DataFrame",
-    ("dask", "DataFrame", "tail"): "pandas.DataFrame",
-    # dask Series → pandas Series
-    ("dask", "Series", "head"): "pandas.Series",
-    ("dask", "Series", "compute"): "pandas.Series",
-    # xarray aggregations (stay xarray)
-    ("xarray", "DataArray", "mean"): "same",
-    ("xarray", "DataArray", "sum"): "same",
-    ("xarray", "DataArray", "std"): "same",
-    ("xarray", "DataArray", "min"): "same",
-    ("xarray", "DataArray", "max"): "same",
-    ("xarray", "Dataset", "mean"): "same",
-    ("xarray", "Dataset", "sum"): "same",
-}
-
-# Binary operation rules: {(left_type, right_type, op): result_type}
-# Using type names as strings for portability
-_BINARY_RULES: dict[tuple[str, str, str], type | None] = {
-    # Division always returns float
-    ("int", "int", "truediv"): float,
-    ("int", "float", "truediv"): float,
-    ("float", "int", "truediv"): float,
-    ("float", "float", "truediv"): float,
-    # Floor division preserves int
-    ("int", "int", "floordiv"): int,
-    ("int", "float", "floordiv"): float,
-    ("float", "int", "floordiv"): float,
-    ("float", "float", "floordiv"): float,
-    # Comparison returns bool
-    ("int", "int", "lt"): bool,
-    ("int", "int", "le"): bool,
-    ("int", "int", "gt"): bool,
-    ("int", "int", "ge"): bool,
-    ("int", "int", "eq"): bool,
-    ("int", "int", "ne"): bool,
-    ("float", "float", "lt"): bool,
-    ("float", "float", "gt"): bool,
-    ("float", "float", "eq"): bool,
-    ("int", "float", "lt"): bool,
-    ("int", "float", "gt"): bool,
-    ("int", "float", "eq"): bool,
-    ("float", "int", "lt"): bool,
-    ("float", "int", "gt"): bool,
-    ("float", "int", "eq"): bool,
-    # Type promotion: int + float → float
-    ("int", "float", "add"): float,
-    ("float", "int", "add"): float,
-    ("int", "float", "sub"): float,
-    ("float", "int", "sub"): float,
-    ("int", "float", "mul"): float,
-    ("float", "int", "mul"): float,
-}
-
-# Unary operation rules: {(type, op): result_type}
-_UNARY_RULES: dict[tuple[str, str], type | None] = {
-    ("int", "neg"): int,
-    ("int", "pos"): int,
-    ("int", "abs"): int,
-    ("int", "invert"): int,
-    ("float", "neg"): float,
-    ("float", "pos"): float,
-    ("float", "abs"): float,
-    ("bool", "not"): bool,
-    ("bool", "invert"): int,  # ~True == -2
-}
+# Operation categories (frozenset for O(1) lookup)
+_COMPARISON_OPS = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
+_DIVISION_OPS = frozenset({"truediv", "div"})
+_FLOOR_DIV_OPS = frozenset({"floordiv"})
+_AGGREGATION_OPS = frozenset(
+    {
+        "sum",
+        "mean",
+        "std",
+        "var",
+        "min",
+        "max",
+        "count",
+        "median",
+        "prod",
+        "sem",
+        "skew",
+        "kurt",
+        "quantile",
+        "nunique",
+        "idxmin",
+        "idxmax",
+        "all",
+        "any",
+    }
+)
+_DASK_TO_PANDAS_OPS = frozenset({"head", "tail", "compute"})
+_PRESERVE_TYPE_UNARY_OPS = frozenset({"neg", "pos", "abs", "invert"})
+_BOOL_UNARY_OPS = frozenset({"not"})
 
 
-def _get_type_name(t: type) -> str:
-    """Get normalized type name for lookup."""
-    return t.__name__
+def _is_dask_type(t: type) -> bool:
+    """Check if type is from dask."""
+    return t.__module__.startswith("dask")
 
 
-def _resolve_method_result(input_type: type, result: str | None) -> type | None:
-    """Resolve method result string to actual type."""
-    if result is None:
-        return None
-    if result == "same":
-        return input_type
-    # Handle cross-module results like "pandas.DataFrame"
-    if "." in result:
-        module, cls_name = result.rsplit(".", 1)
-        try:
-            mod = __import__(module)
-            cls: type = getattr(mod, cls_name)
-            return cls
-        except (ImportError, AttributeError):
-            return None
-    # Same-module result
-    module = input_type.__module__.split(".")[0]
+def _is_xarray_type(t: type) -> bool:
+    """Check if type is from xarray."""
+    return t.__module__.startswith("xarray")
+
+
+def _is_pandas_type(t: type) -> bool:
+    """Check if type is from pandas."""
+    return t.__module__.startswith("pandas")
+
+
+def _dask_to_pandas(t: type) -> type | None:
+    """Convert dask type to pandas equivalent."""
     try:
-        mod = __import__(module)
-        cls2: type = getattr(mod, result)
-        return cls2
-    except (ImportError, AttributeError):
+        import pandas as pd
+    except ImportError:
         return None
+
+    name = t.__name__
+    if name == "DataFrame":
+        return cast(type, pd.DataFrame)
+    if name == "Series":
+        return cast(type, pd.Series)
+    return None
+
+
+def _reduce_type(t: type) -> type | None:
+    """
+    Aggregation reduces dimension: DataFrame→Series, Series→scalar.
+    xarray stays xarray (fewer dims).
+    """
+    # Handle optional pandas
+    try:
+        import pandas as pd
+
+        if t is pd.DataFrame:
+            return cast(type, pd.Series)
+        if t is pd.Series:
+            return None  # scalar
+    except ImportError:
+        pass
+
+    # xarray aggregations stay xarray
+    if _is_xarray_type(t):
+        return t
+
+    # Unknown types: passthrough
+    return t
+
+
+def _promote_types(left: type, right: type) -> type:
+    """
+    Binary op result: highest precedence type wins.
+    Array types dominate, then float dominates int.
+    """
+    # Try to get array types (optional deps)
+    array_types: list[type] = []
+
+    try:
+        import xarray as xr
+
+        array_types.append(xr.DataArray)
+    except ImportError:
+        pass
+
+    try:
+        import numpy as np
+
+        array_types.append(np.ndarray)
+    except ImportError:
+        pass
+
+    try:
+        import pandas as pd
+
+        array_types.extend([pd.DataFrame, pd.Series])
+    except ImportError:
+        pass
+
+    # Array types dominate
+    for arr_type in array_types:
+        if left is arr_type or right is arr_type:
+            return arr_type
+
+    # float dominates int
+    if left is float or right is float:
+        return float
+
+    return left
+
+
+def _handle_binary_op(left: type, right: type, operation: str) -> type | None:
+    """Handle binary operations with general rules."""
+    # Comparisons → bool
+    if operation in _COMPARISON_OPS:
+        return bool
+
+    # True division → float
+    if operation in _DIVISION_OPS:
+        return float
+
+    # Floor division: int//int → int, otherwise float
+    if operation in _FLOOR_DIV_OPS:
+        if left is int and right is int:
+            return int
+        if left in (int, float) and right in (int, float):
+            return float
+        return _promote_types(left, right)
+
+    # Type promotion for other ops (add, sub, mul, etc.)
+    return _promote_types(left, right)
+
+
+def _handle_unary_or_method(input_type: type, operation: str) -> type | None:
+    """Handle unary operations and method calls."""
+    # Unary ops that preserve type (neg, pos, abs, invert)
+    if operation in _PRESERVE_TYPE_UNARY_OPS:
+        # Special case: bool invert returns int (~True == -2)
+        if input_type is bool and operation == "invert":
+            return int
+        return input_type
+
+    # Bool unary ops (not)
+    if operation in _BOOL_UNARY_OPS:
+        return bool
+
+    # Dask → pandas conversions
+    if operation in _DASK_TO_PANDAS_OPS and _is_dask_type(input_type):
+        result = _dask_to_pandas(input_type)
+        if result is not None:
+            return result
+
+    # Aggregations reduce dimension
+    if operation in _AGGREGATION_OPS:
+        return _reduce_type(input_type)
+
+    # Default: passthrough (same type out)
+    return input_type
 
 
 @overload
@@ -167,36 +221,7 @@ def concrete_transform(input_type: type | tuple[type, type], operation: str) -> 
         <class 'int'>
     """
     if isinstance(input_type, tuple):
-        return _transform_binary(input_type, operation)
-    return _transform_method_or_unary(input_type, operation)
+        left, right = input_type
+        return _handle_binary_op(left, right, operation)
 
-
-def _transform_binary(types: tuple[type, type], operation: str) -> type | None:
-    """Handle binary operations."""
-    left, right = types
-    left_name = _get_type_name(left)
-    right_name = _get_type_name(right)
-    key = (left_name, right_name, operation)
-    if key in _BINARY_RULES:
-        return _BINARY_RULES[key]
-    # Passthrough: return left type for unknown ops
-    return left
-
-
-def _transform_method_or_unary(input_type: type, operation: str) -> type | None:
-    """Handle method calls and unary operations."""
-    # Try unary first (for primitives)
-    type_name = _get_type_name(input_type)
-    unary_key = (type_name, operation)
-    if unary_key in _UNARY_RULES:
-        return _UNARY_RULES[unary_key]
-
-    # Try method rules
-    module = input_type.__module__.split(".")[0]
-    class_name = input_type.__name__
-    method_key = (module, class_name, operation)
-    if method_key in _METHOD_RULES:
-        return _resolve_method_result(input_type, _METHOD_RULES[method_key])
-
-    # Passthrough: return input type for unknown methods
-    return input_type
+    return _handle_unary_or_method(input_type, operation)
