@@ -171,7 +171,7 @@ class TestBinaryOps:
         """Comparison operations return bool."""
         result = concrete_transform((left, right), op)
 
-        assert result == bool
+        assert result is bool
 
     @pytest.mark.parametrize(
         "left,right,op,expected",
@@ -224,13 +224,13 @@ class TestPassthrough:
         """Unknown method returns input type (passthrough)."""
         result = concrete_transform(str, "unknown_method")
 
-        assert result == str
+        assert result is str
 
     def test_unknown_binary_returns_left_type(self) -> None:
         """Unknown binary op returns left type (passthrough)."""
         result = concrete_transform((str, int), "unknown_op")
 
-        assert result == str
+        assert result is str
 
     @pandas_required
     def test_unknown_pandas_method_passthrough(self) -> None:
