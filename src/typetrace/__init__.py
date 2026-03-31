@@ -7,6 +7,7 @@ Core concepts:
 - infer: Run function on samples to discover output type
 """
 
+from typetrace.concrete import concrete_transform
 from typetrace.core import Dims, Symbol, TypeDesc
 from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
 from typetrace.inference import TypeContext, infer_types
@@ -24,6 +25,7 @@ __all__ = [
     "TypeDesc",
     "Symbol",
     "Dims",
+    "concrete_transform",
     "infer_types",
     "TypeContext",
     "ExecutionTraits",
