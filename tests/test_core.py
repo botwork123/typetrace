@@ -4,7 +4,6 @@
 from importlib.util import find_spec
 
 import pytest
-
 from typetrace.core import Symbol, TypeDesc
 
 
