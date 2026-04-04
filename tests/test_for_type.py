@@ -3,8 +3,30 @@
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from typetrace import TypeDesc
+
+
+class TestForTypePrimitives:
+    """Test TypeDesc.for_type() returns scalar for primitive types."""
+
+    def test_bool(self) -> None:
+        td = TypeDesc.for_type(bool, dtype="bool")
+        assert td.kind == "scalar"
+        assert td.dtype == "bool"
+
+    def test_int(self) -> None:
+        td = TypeDesc.for_type(int, dtype="int64")
+        assert td.kind == "scalar"
+        assert td.dtype == "int64"
+
+    def test_float(self) -> None:
+        td = TypeDesc.for_type(float, dtype="float64")
+        assert td.kind == "scalar"
+        assert td.dtype == "float64"
+
+    def test_str(self) -> None:
+        td = TypeDesc.for_type(str)
+        assert td.kind == "scalar"
 
 
 class TestForType:

@@ -296,6 +296,7 @@ class TypeDesc:
         """Map Python type to TypeDesc kind.
 
         Supports:
+        - primitives: bool, int, float, str → "scalar"
         - xarray: DataArray, Dataset → "ndarray"
         - numpy: ndarray → "ndarray"
         - pandas: DataFrame → "dataframe", Series → "series"
@@ -303,6 +304,10 @@ class TypeDesc:
         - pyarrow: Table → "columnar"
         - drjit: any dr.* array type → "drjit"
         """
+        # Python primitives
+        if concrete_type in (bool, int, float, str):
+            return "scalar"
+
         module_root = concrete_type.__module__.split(".")[0]
 
         # xarray types
