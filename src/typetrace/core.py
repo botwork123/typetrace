@@ -105,32 +105,20 @@ class TypeDesc:
     drjit_type: type | None = None
     static_dims: tuple[int, ...] | None = None
 
-    # Backward-compatible flag for dataframe/columnar partial-schema semantics.
-    # Primary public syntax is trailing ellipsis in `columns`.
-    allow_extra_columns: bool = False
-
     def __post_init__(self) -> None:
-        """Normalize partial-schema semantics for dataframe/columnar descriptors."""
+        """Validate partial-schema semantics for dataframe/columnar descriptors."""
         if self.kind not in {"dataframe", "columnar"}:
             return
 
         columns = list(self.columns) if self.columns is not None else None
-        has_trailing_ellipsis = columns is not None and len(columns) > 0 and columns[-1] is ...
 
         if columns is not None:
             for idx, col in enumerate(columns):
                 if col is ... and idx != len(columns) - 1:
                     raise ValueError("columns must use trailing ellipsis only")
 
-        allow_extra_columns = self.allow_extra_columns or has_trailing_ellipsis
-
-        if allow_extra_columns and columns is not None and not has_trailing_ellipsis:
-            columns.append(...)
-
         if columns is not self.columns:
             object.__setattr__(self, "columns", columns)
-        if allow_extra_columns != self.allow_extra_columns:
-            object.__setattr__(self, "allow_extra_columns", allow_extra_columns)
 
     def known_columns(self) -> list[str] | None:
         """Return concrete known columns, excluding optional trailing ellipsis marker."""
@@ -274,7 +262,6 @@ class TypeDesc:
         fields: dict[str, "TypeDesc"] | None = None,
         drjit_type: type | None = None,
         static_dims: tuple[int, ...] | None = None,
-        allow_extra_columns: bool = False,
     ) -> "TypeDesc":
         """Create TypeDesc by inferring kind from concrete_type.
 
@@ -293,8 +280,6 @@ class TypeDesc:
             fields: Nested TypeDescs for opaque classes
             drjit_type: Actual DrJit type for codegen
             static_dims: DrJit static dimensions
-            allow_extra_columns: Backward-compatible alias for partial schema.
-                Preferred API is trailing ellipsis in `columns`.
 
         Returns:
             TypeDesc with kind inferred from concrete_type
@@ -318,7 +303,6 @@ class TypeDesc:
             fields=fields,
             drjit_type=drjit_type,
             static_dims=static_dims,
-            allow_extra_columns=allow_extra_columns,
         )
 
     @staticmethod

@@ -125,38 +125,25 @@ class TestTypeDesc:
         with pytest.raises(Exception):  # FrozenInstanceError
             t.dims = {"y": 20}  # type: ignore
 
-    def test_dataframe_partial_schema_flag_defaults_false(self) -> None:
-        """Exact schema remains default without ellipsis/flag."""
+    def test_dataframe_exact_schema_default(self) -> None:
+        """Exact schema remains default without trailing ellipsis."""
         t = TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "int64"})
-        assert t.allow_extra_columns is False
         assert t.columns == ["a"]
 
     @pytest.mark.parametrize(
-        "columns,allow_extra_columns,expected_columns,expected_allow_extra",
+        "columns,expected_known",
         [
-            (["a", ...], False, ["a", ...], True),
-            (["a", ...], True, ["a", ...], True),
-            (["a"], True, ["a", ...], True),
-            ([...], False, [...], True),
-            (["a"], False, ["a"], False),
+            (["a", ...], ["a"]),
+            ([...], []),
+            (["a"], ["a"]),
         ],
     )
-    def test_dataframe_partial_schema_normalization(
-        self,
-        columns: list,
-        allow_extra_columns: bool,
-        expected_columns: list,
-        expected_allow_extra: bool,
+    def test_dataframe_partial_schema_ellipsis_only(
+        self, columns: list, expected_known: list
     ) -> None:
-        """Ellipsis is primary API; allow_extra_columns remains backward-compatible."""
-        t = TypeDesc(
-            kind="dataframe",
-            columns=columns,
-            dtypes={"a": "int64"},
-            allow_extra_columns=allow_extra_columns,
-        )
-        assert t.columns == expected_columns
-        assert t.allow_extra_columns is expected_allow_extra
+        """Trailing ellipsis is the only partial-schema signal."""
+        t = TypeDesc(kind="dataframe", columns=columns, dtypes={"a": "int64"})
+        assert t.known_columns() == expected_known
 
     @pytest.mark.parametrize(
         "columns",

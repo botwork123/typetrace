@@ -141,18 +141,17 @@ class TestPandasAdapter:
         assert result["a"].iloc[3] == 0.3333333333333333
 
     @pytest.mark.parametrize(
-        "columns,dtypes,allow_extra_columns,expected_columns",
+        "columns,dtypes,expected_columns",
         [
-            (["a", ...], {"a": "int64"}, False, ["a"]),
-            (["a", "b", ...], {"a": "float64", "b": "bool"}, False, ["a", "b"]),
-            (["a"], {"a": "int64"}, True, ["a"]),
+            (["a", ...], {"a": "int64"}, ["a"]),
+            (["a", "b", ...], {"a": "float64", "b": "bool"}, ["a", "b"]),
+            (["a"], {"a": "int64"}, ["a"]),
         ],
     )
     def test_make_dataframe_sample_partial_schema_known_columns_only(
         self,
         columns: list,
         dtypes: dict[str, str],
-        allow_extra_columns: bool,
         expected_columns: list[str],
     ) -> None:
         """Partial schema samples only materialize known columns (no physical ellipsis column)."""
@@ -163,7 +162,6 @@ class TestPandasAdapter:
             kind="dataframe",
             columns=columns,
             dtypes=dtypes,
-            allow_extra_columns=allow_extra_columns,
         )
         result = make_dataframe_sample(t)
 
@@ -171,7 +169,7 @@ class TestPandasAdapter:
         assert "..." not in result.columns
 
     def test_make_dataframe_sample_exact_schema_unchanged(self) -> None:
-        """Exact-schema samples keep prior behavior when allow_extra_columns is False."""
+        """Exact-schema samples keep prior behavior."""
         from typetrace.adapters.pandas import make_dataframe_sample
         from typetrace.core import TypeDesc
 
@@ -179,7 +177,6 @@ class TestPandasAdapter:
             kind="dataframe",
             columns=["a", "b"],
             dtypes={"a": "float64", "b": "int32"},
-            allow_extra_columns=False,
         )
         result = make_dataframe_sample(t)
 

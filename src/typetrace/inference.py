@@ -162,7 +162,7 @@ def infer_by_execution(
         expected_output_traits: Optional runtime execution contract
         allow_device_copy: Allow cross-device handoff if transfer copy is required
         require_exact_dataframe_schema: Fail fast if any dataframe input uses
-            partial schema semantics (`allow_extra_columns=True`).
+            partial schema semantics (trailing ellipsis in `columns`).
         operation_name: Optional operation context for error messages.
         **kwargs: Additional keyword arguments for fn
 
@@ -173,10 +173,15 @@ def infer_by_execution(
 
     if require_exact_dataframe_schema:
         for index, type_desc in enumerate(input_types):
-            if type_desc.kind == "dataframe" and type_desc.allow_extra_columns:
+            has_trailing_ellipsis = (
+                type_desc.columns is not None
+                and len(type_desc.columns) > 0
+                and type_desc.columns[-1] is ...
+            )
+            if type_desc.kind == "dataframe" and has_trailing_ellipsis:
                 raise ValueError(
                     f"infer_by_execution({operation}): input[{index}] has partial "
-                    "dataframe schema (allow_extra_columns=True); operation "
+                    "dataframe schema (columns end with ...); operation "
                     "requires exact full column set."
                 )
 

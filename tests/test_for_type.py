@@ -29,28 +29,19 @@ class TestForType:
         assert td.shape == (10, 20)
 
     @pytest.mark.parametrize(
-        "columns,allow_extra_columns,expected_columns,expected_allow_extra",
+        "columns,expected_columns",
         [
-            (["a", "b", "c"], False, ["a", "b", "c"], False),
-            (["a", "b", ...], False, ["a", "b", ...], True),
-            (["a", "b"], True, ["a", "b", ...], True),
+            (["a", "b", "c"], ["a", "b", "c"]),
+            (["a", "b", ...], ["a", "b", ...]),
         ],
     )
-    def test_pandas_dataframe(
-        self,
-        columns: list,
-        allow_extra_columns: bool,
-        expected_columns: list,
-        expected_allow_extra: bool,
-    ) -> None:
+    def test_pandas_dataframe(self, columns: list, expected_columns: list) -> None:
         td = TypeDesc.for_type(
             pd.DataFrame,
             columns=columns,
-            allow_extra_columns=allow_extra_columns,
         )
         assert td.kind == "dataframe"
         assert td.columns == expected_columns
-        assert td.allow_extra_columns is expected_allow_extra
 
     def test_pandas_series(self) -> None:
         td = TypeDesc.for_type(pd.Series, dtype="float64")

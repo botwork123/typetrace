@@ -433,7 +433,7 @@ class TestInferByExecution:
 
         with pytest.raises(
             ValueError,
-            match=r"partial dataframe schema \(allow_extra_columns=True\); operation requires exact full column set",
+            match=r"partial dataframe schema \(columns end with \.\.\.\); operation requires exact full column set",
         ):
             infer_by_execution(
                 should_not_run,
