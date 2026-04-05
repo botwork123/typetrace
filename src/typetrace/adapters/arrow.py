@@ -67,21 +67,22 @@ def make_arrow_table_sample(type_desc: TypeDesc) -> Any:
     """
     import pyarrow as pa
 
-    if type_desc.columns is None:
+    known_columns = type_desc.known_columns()
+    if known_columns is None:
         raise ValueError("Cannot make Arrow Table sample without columns")
 
     dtypes = type_desc.dtypes or {}
     fields = []
     arrays = []
 
-    for col in type_desc.columns:
+    for col in known_columns:
         dtype_str = dtypes.get(col, "float64")
         arrow_type = _get_arrow_type(dtype_str)
         fields.append(pa.field(col, arrow_type))
         arrays.append(pa.array([], type=arrow_type))
 
     schema = pa.schema(fields)
-    return pa.table(dict(zip(type_desc.columns, arrays)), schema=schema)
+    return pa.table(dict(zip(known_columns, arrays)), schema=schema)
 
 
 def make_arrow_array_sample(type_desc: TypeDesc) -> Any:

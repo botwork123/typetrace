@@ -31,7 +31,7 @@ print(infer_by_execution(weighted_xarray, xarray_input))
 # pandas MultiIndex panel
 panel_input = TypeDesc(
     kind="dataframe",
-    columns=["ret", "mkt"],
+    columns=["ret", "mkt", ...],  # known columns + unknown extras
     dtypes={"ret": "float64", "mkt": "float64"},
     index={"time": 4, "asset": 3},
 )

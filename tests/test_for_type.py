@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from typetrace import TypeDesc
@@ -28,10 +29,20 @@ class TestForType:
         assert td.dtype == "int32"
         assert td.shape == (10, 20)
 
-    def test_pandas_dataframe(self) -> None:
-        td = TypeDesc.for_type(pd.DataFrame, columns=["a", "b", "c"])
+    @pytest.mark.parametrize(
+        "columns,expected_columns",
+        [
+            (["a", "b", "c"], ["a", "b", "c"]),
+            (["a", "b", ...], ["a", "b", ...]),
+        ],
+    )
+    def test_pandas_dataframe(self, columns: list, expected_columns: list) -> None:
+        td = TypeDesc.for_type(
+            pd.DataFrame,
+            columns=columns,
+        )
         assert td.kind == "dataframe"
-        assert td.columns == ["a", "b", "c"]
+        assert td.columns == expected_columns
 
     def test_pandas_series(self) -> None:
         td = TypeDesc.for_type(pd.Series, dtype="float64")

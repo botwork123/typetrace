@@ -126,6 +126,38 @@ class TestTypeDesc:
         with pytest.raises(Exception):  # FrozenInstanceError
             t.dims = {"y": 20}  # type: ignore
 
+    def test_dataframe_exact_schema_default(self) -> None:
+        """Exact schema remains default without trailing ellipsis."""
+        t = TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "int64"})
+        assert t.columns == ["a"]
+
+    @pytest.mark.parametrize(
+        "columns,expected_known",
+        [
+            (["a", ...], ["a"]),
+            ([...], []),
+            (["a"], ["a"]),
+        ],
+    )
+    def test_dataframe_partial_schema_ellipsis_only(
+        self, columns: list, expected_known: list
+    ) -> None:
+        """Trailing ellipsis is the only partial-schema signal."""
+        t = TypeDesc(kind="dataframe", columns=columns, dtypes={"a": "int64"})
+        assert t.known_columns() == expected_known
+
+    @pytest.mark.parametrize(
+        "columns",
+        [
+            ["a", ..., "b"],
+            ["a", ..., ...],
+        ],
+    )
+    def test_dataframe_partial_schema_ellipsis_must_be_trailing(self, columns: list) -> None:
+        """Ellipsis marker must only appear as final columns entry."""
+        with pytest.raises(ValueError, match="trailing ellipsis"):
+            TypeDesc(kind="dataframe", columns=columns)
+
 
 class TestTypeDescFromValue:
     """Tests for TypeDesc.from_value class method."""

@@ -102,12 +102,13 @@ def make_polars_dataframe_sample(type_desc: TypeDesc) -> Any:
     """
     import polars as pl
 
-    if type_desc.columns is None:
+    known_columns = type_desc.known_columns()
+    if known_columns is None:
         raise ValueError("Cannot make Polars DataFrame sample without columns")
 
     dtypes = type_desc.dtypes or {}
     schema = {}
-    for col in type_desc.columns:
+    for col in known_columns:
         dtype_str = dtypes.get(col, "Float64")
         schema[col] = _get_polars_dtype(dtype_str)
 
