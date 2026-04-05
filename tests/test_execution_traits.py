@@ -1,6 +1,7 @@
 """Tests for runtime execution traits and layout transitions."""
 
 import pytest
+
 from typetrace.core import TypeDesc
 from typetrace.execution_traits import ExecutionTraits, _drjit_dtype, infer_execution_traits
 from typetrace.inference import infer_by_execution
