@@ -4,7 +4,6 @@
 from importlib.util import find_spec
 
 import pytest
-
 from typetrace.core import Symbol, TypeDesc
 
 
@@ -125,6 +124,28 @@ class TestTypeDesc:
         t = TypeDesc(kind="ndarray", dims={"x": 10})
         with pytest.raises(Exception):  # FrozenInstanceError
             t.dims = {"y": 20}  # type: ignore
+
+    def test_dataframe_partial_schema_flag_defaults_false(self) -> None:
+        """allow_extra_columns defaults to False for dataframe descriptors."""
+        t = TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "int64"})
+        assert t.allow_extra_columns is False
+
+    def test_dataframe_partial_schema_flag_roundtrip(self) -> None:
+        """allow_extra_columns persists in dataclass construction/equality."""
+        left = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=True,
+        )
+        right = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=True,
+        )
+        assert left.allow_extra_columns is True
+        assert left == right
 
 
 class TestTypeDescFromValue:

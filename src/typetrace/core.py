@@ -103,6 +103,9 @@ class TypeDesc:
     drjit_type: type | None = None
     static_dims: tuple[int, ...] | None = None
 
+    # For dataframe/columnar partial-schema semantics
+    allow_extra_columns: bool = False
+
     def with_dims(self, dims: Dims) -> "TypeDesc":
         """Return copy with updated dims."""
         return replace(self, dims=dims)
@@ -237,6 +240,7 @@ class TypeDesc:
         fields: dict[str, "TypeDesc"] | None = None,
         drjit_type: type | None = None,
         static_dims: tuple[int, ...] | None = None,
+        allow_extra_columns: bool = False,
     ) -> "TypeDesc":
         """Create TypeDesc by inferring kind from concrete_type.
 
@@ -254,6 +258,8 @@ class TypeDesc:
             fields: Nested TypeDescs for opaque classes
             drjit_type: Actual DrJit type for codegen
             static_dims: DrJit static dimensions
+            allow_extra_columns: For dataframe/columnar descriptors, whether
+                unknown extra columns may exist beyond known columns/dtypes.
 
         Returns:
             TypeDesc with kind inferred from concrete_type
@@ -277,6 +283,7 @@ class TypeDesc:
             fields=fields,
             drjit_type=drjit_type,
             static_dims=static_dims,
+            allow_extra_columns=allow_extra_columns,
         )
 
     @staticmethod

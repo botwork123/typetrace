@@ -4,7 +4,6 @@ from importlib.util import find_spec
 
 import pytest
 import yaml
-
 from typetrace.core import TypeDesc
 from typetrace.inference import infer_by_execution
 

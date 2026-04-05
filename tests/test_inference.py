@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import pytest
-
 from typetrace.core import Symbol, TypeDesc
 from typetrace.inference import TypeContext, infer_by_execution, infer_types
 
@@ -364,3 +363,112 @@ class TestInferByExecution:
 
         assert result.kind == "dataframe"
         assert "new_col" in result.columns
+
+    def test_infer_by_execution_partial_schema_known_column_op_succeeds(
+        self, pandas_available: bool
+    ) -> None:
+        """Partial-schema descriptors still support known-column operations."""
+        if not pandas_available:
+            pytest.skip("pandas not installed")
+
+        import pandas as pd
+
+        def select_known(df: pd.DataFrame) -> pd.DataFrame:
+            return df[["a"]]
+
+        input_type = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=True,
+        )
+        result = infer_by_execution(select_known, input_type, operation_name="select_known")
+
+        assert result.kind == "dataframe"
+        assert result.columns == ["a"]
+
+    def test_infer_by_execution_partial_schema_unknown_column_op_fails_with_context(
+        self, pandas_available: bool
+    ) -> None:
+        """Unknown-column access fails with infer_by_execution context."""
+        if not pandas_available:
+            pytest.skip("pandas not installed")
+
+        import pandas as pd
+
+        def select_unknown(df: pd.DataFrame) -> pd.DataFrame:
+            return df[["b"]]
+
+        input_type = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=True,
+        )
+
+        with pytest.raises(
+            ValueError, match=r"infer_by_execution\(select_unknown\) execution failed"
+        ):
+            infer_by_execution(select_unknown, input_type, operation_name="select_unknown")
+
+    @pytest.mark.parametrize("operation_name", ["select_all", "drop_complement"])
+    def test_infer_by_execution_partial_schema_full_schema_required_fails_fast(
+        self,
+        pandas_available: bool,
+        operation_name: str,
+    ) -> None:
+        """Full-schema-required mode fails before executing function."""
+        if not pandas_available:
+            pytest.skip("pandas not installed")
+
+        called = {"value": False}
+
+        def should_not_run(df):
+            called["value"] = True
+            return df
+
+        input_type = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=True,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"partial dataframe schema \(allow_extra_columns=True\); operation requires exact full column set",
+        ):
+            infer_by_execution(
+                should_not_run,
+                input_type,
+                require_exact_dataframe_schema=True,
+                operation_name=operation_name,
+            )
+
+        assert called["value"] is False
+
+    def test_infer_by_execution_exact_schema_path_not_blocked(self, pandas_available: bool) -> None:
+        """Exact-schema descriptors are not blocked by full-schema-required guard."""
+        if not pandas_available:
+            pytest.skip("pandas not installed")
+
+        import pandas as pd
+
+        def identity(df: pd.DataFrame) -> pd.DataFrame:
+            return df
+
+        input_type = TypeDesc(
+            kind="dataframe",
+            columns=["a"],
+            dtypes={"a": "int64"},
+            allow_extra_columns=False,
+        )
+        result = infer_by_execution(
+            identity,
+            input_type,
+            require_exact_dataframe_schema=True,
+            operation_name="select_all",
+        )
+
+        assert result.kind == "dataframe"
+        assert result.columns == ["a"]
