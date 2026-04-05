@@ -141,6 +141,15 @@ def infer_types(
     return resolved
 
 
+def _callable_label(fn: Callable[..., Any]) -> str:
+    """Return readable callable label for error messages."""
+    if hasattr(fn, "__qualname__") and hasattr(fn, "__module__"):
+        return f"{fn.__module__}.{fn.__qualname__}"
+    if hasattr(fn, "__name__"):
+        return str(fn.__name__)
+    return repr(fn)
+
+
 def infer_by_execution(
     fn: Callable,
     *input_types: TypeDesc,
@@ -164,10 +173,31 @@ def infer_by_execution(
     Returns:
         TypeDesc extracted from function's output
     """
-    samples = [type_desc.make_sample() for type_desc in input_types]
-    result = fn(*samples, **kwargs)
-    _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
-    return TypeDesc.from_value(result)
+    fn_label = _callable_label(fn)
+    samples: list[Any] = []
+    for i, type_desc in enumerate(input_types):
+        try:
+            samples.append(type_desc.make_sample())
+        except Exception as exc:
+            raise ValueError(
+                f"infer_by_execution sample-build failed for {fn_label} "
+                f"at input index {i}: {exc}"
+            ) from exc
+
+    try:
+        result = fn(*samples, **kwargs)
+    except Exception as exc:
+        raise ValueError(f"infer_by_execution execution failed for {fn_label}: {exc}") from exc
+
+    try:
+        _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
+    except Exception as exc:
+        raise ValueError(f"infer_by_execution handoff-check failed for {fn_label}: {exc}") from exc
+
+    try:
+        return TypeDesc.from_value(result)
+    except Exception as exc:
+        raise ValueError(f"infer_by_execution output-extract failed for {fn_label}: {exc}") from exc
 
 
 def _validate_execution_handoff(

@@ -56,17 +56,19 @@ def _default_sample_size() -> int:
 def _series_values(dtype: str, size: int) -> Any:
     import numpy as np
 
-    if "int" in dtype and "uint" not in dtype:
-        return np.arange(size, dtype=dtype)
-    if "uint" in dtype:
-        return np.arange(size, dtype=dtype)
-    if "bool" in dtype:
+    dtype_lower = dtype.lower()
+
+    if "int" in dtype_lower and "uint" not in dtype_lower:
+        return np.arange(size, dtype=dtype_lower)
+    if "uint" in dtype_lower:
+        return np.arange(size, dtype=dtype_lower)
+    if "bool" in dtype_lower:
         return np.array([(i % 2) == 0 for i in range(size)], dtype="bool")
-    if "datetime" in dtype:
+    if "datetime" in dtype_lower:
         return np.arange(np.datetime64("2024-01-01"), np.datetime64("2024-01-01") + size)
-    if "str" in dtype or "object" in dtype:
+    if "str" in dtype_lower or "object" in dtype_lower or dtype_lower == "utf8":
         return np.array([f"v_{i}" for i in range(size)], dtype=object)
-    return np.linspace(0.0, 1.0, num=size, dtype="float64").astype(dtype)
+    return np.linspace(0.0, 1.0, num=size, dtype="float64")
 
 
 def _index_values(name: str, size: int) -> list[Any]:

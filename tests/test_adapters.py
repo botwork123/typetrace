@@ -40,7 +40,6 @@ class TestPandasAdapter:
     def test_from_pandas_dataframe(self) -> None:
         """from_pandas extracts TypeDesc from DataFrame."""
         import pandas as pd
-
         from typetrace.adapters.pandas import from_pandas
 
         df = pd.DataFrame({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
@@ -53,7 +52,6 @@ class TestPandasAdapter:
     def test_from_pandas_dataframe_with_named_index(self) -> None:
         """from_pandas captures named index."""
         import pandas as pd
-
         from typetrace.adapters.pandas import from_pandas
 
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -65,7 +63,6 @@ class TestPandasAdapter:
     def test_from_pandas_dataframe_with_multiindex(self) -> None:
         """from_pandas captures MultiIndex."""
         import pandas as pd
-
         from typetrace.adapters.pandas import from_pandas
 
         df = pd.DataFrame({"a": [1, 2, 3, 4]})
@@ -79,7 +76,6 @@ class TestPandasAdapter:
     def test_from_pandas_series(self) -> None:
         """from_pandas extracts TypeDesc from Series."""
         import pandas as pd
-
         from typetrace.adapters.pandas import from_pandas
 
         s = pd.Series([1.0, 2.0, 3.0], name="values")
@@ -91,7 +87,6 @@ class TestPandasAdapter:
     def test_from_pandas_series_with_named_index(self) -> None:
         """from_pandas captures Series named index."""
         import pandas as pd
-
         from typetrace.adapters.pandas import from_pandas
 
         s = pd.Series([1, 2, 3])
@@ -110,7 +105,6 @@ class TestPandasAdapter:
     def test_make_dataframe_sample(self) -> None:
         """make_dataframe_sample creates empty DataFrame with schema."""
         import pandas as pd
-
         from typetrace.adapters.pandas import make_dataframe_sample
         from typetrace.core import TypeDesc
 
@@ -146,6 +140,29 @@ class TestPandasAdapter:
         assert len(result) == 10
         assert result["a"].iloc[3] == 0.3333333333333333
 
+    @pytest.mark.parametrize(
+        "dtype,column,expected",
+        [
+            ("uint32", "u", 1),
+            ("datetime64[ns]", "t", "2024-01-02"),
+            ("utf8", "s", "v_0"),
+        ],
+    )
+    def test_make_dataframe_sample_dtype_branches(
+        self, dtype: str, column: str, expected: int | str
+    ) -> None:
+        """make_dataframe_sample supports uint, datetime, and utf8-like dtypes."""
+        from typetrace.adapters.pandas import make_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="dataframe", columns=[column], dtypes={column: dtype})
+        result = make_dataframe_sample(t)
+
+        if dtype == "datetime64[ns]":
+            assert str(result[column].iloc[1].date()) == expected
+        else:
+            assert result[column].iloc[1 if dtype == "uint32" else 0] == expected
+
     def test_make_dataframe_sample_no_columns(self) -> None:
         """make_dataframe_sample raises ValueError without columns."""
         from typetrace.adapters.pandas import make_dataframe_sample
@@ -158,7 +175,6 @@ class TestPandasAdapter:
     def test_make_series_sample(self) -> None:
         """make_series_sample creates empty Series with dtype."""
         import pandas as pd
-
         from typetrace.adapters.pandas import make_series_sample
         from typetrace.core import TypeDesc
 
@@ -203,7 +219,6 @@ class TestXarrayAdapter:
         """from_xarray extracts TypeDesc from DataArray."""
         import numpy as np
         import xarray as xr
-
         from typetrace.adapters.xarray import from_xarray
 
         da = xr.DataArray(np.zeros((10, 20)), dims=["x", "y"], attrs={"units": "meters"})
@@ -217,7 +232,6 @@ class TestXarrayAdapter:
         """from_xarray handles object dtype."""
         import numpy as np
         import xarray as xr
-
         from typetrace.adapters.xarray import from_xarray
 
         # Create actual object dtype array with mixed types
@@ -230,7 +244,6 @@ class TestXarrayAdapter:
         """from_xarray extracts TypeDesc from Dataset."""
         import numpy as np
         import xarray as xr
-
         from typetrace.adapters.xarray import from_xarray
 
         ds = xr.Dataset(
@@ -257,7 +270,6 @@ class TestXarrayAdapter:
     def test_make_xarray_sample(self) -> None:
         """make_xarray_sample creates DataArray with correct dims."""
         import xarray as xr
-
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import TypeDesc
 
@@ -273,7 +285,6 @@ class TestXarrayAdapter:
     def test_make_xarray_sample_with_symbol(self) -> None:
         """make_xarray_sample handles symbolic dims."""
         import xarray as xr
-
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import Symbol, TypeDesc
 
@@ -312,7 +323,6 @@ class TestPolarsAdapter:
     def test_from_polars_dataframe(self) -> None:
         """from_polars extracts TypeDesc from DataFrame."""
         import polars as pl
-
         from typetrace.adapters.polars import from_polars
 
         df = pl.DataFrame({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
@@ -326,7 +336,6 @@ class TestPolarsAdapter:
     def test_from_polars_series(self) -> None:
         """from_polars extracts TypeDesc from Series."""
         import polars as pl
-
         from typetrace.adapters.polars import from_polars
 
         s = pl.Series("values", [1.0, 2.0, 3.0])
@@ -355,7 +364,6 @@ class TestPolarsAdapter:
     ) -> None:
         """make_polars_dataframe_sample creates empty DataFrame with schema."""
         import polars as pl
-
         from typetrace.adapters.polars import make_polars_dataframe_sample
         from typetrace.core import TypeDesc
 
@@ -390,7 +398,6 @@ class TestPolarsAdapter:
     def test_make_polars_series_sample(self, dtype: str | None, expected_dtypes: list) -> None:
         """make_polars_series_sample creates empty Series with dtype."""
         import polars as pl
-
         from typetrace.adapters.polars import make_polars_series_sample
         from typetrace.core import TypeDesc
 
@@ -428,7 +435,6 @@ class TestArrowAdapter:
     def test_from_arrow_table(self) -> None:
         """from_arrow extracts TypeDesc from Table."""
         import pyarrow as pa
-
         from typetrace.adapters.arrow import from_arrow
 
         table = pa.table({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
@@ -442,7 +448,6 @@ class TestArrowAdapter:
     def test_from_arrow_array(self) -> None:
         """from_arrow extracts TypeDesc from Array."""
         import pyarrow as pa
-
         from typetrace.adapters.arrow import from_arrow
 
         arr = pa.array([1.0, 2.0, 3.0])
@@ -472,7 +477,6 @@ class TestArrowAdapter:
     ) -> None:
         """make_arrow_table_sample creates empty Table with schema."""
         import pyarrow as pa
-
         from typetrace.adapters.arrow import make_arrow_table_sample
         from typetrace.core import TypeDesc
 
@@ -507,7 +511,6 @@ class TestArrowAdapter:
     def test_make_arrow_array_sample(self, dtype: str | None, expected_type: str) -> None:
         """make_arrow_array_sample creates empty Array with type."""
         import pyarrow as pa
-
         from typetrace.adapters.arrow import make_arrow_array_sample
         from typetrace.core import TypeDesc
 
@@ -540,7 +543,6 @@ class TestArrowAdapter:
     def test_make_sample_columnar_via_core(self) -> None:
         """TypeDesc.make_sample() works for columnar kind."""
         import pyarrow as pa
-
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
@@ -562,7 +564,6 @@ class TestDrJitAdapter:
     def test_from_drjit_float_array(self) -> None:
         """from_drjit extracts TypeDesc from float array."""
         from drjit import llvm
-
         from typetrace.adapters.drjit import from_drjit
 
         arr = llvm.Float64([1.0, 2.0, 3.0])
@@ -575,7 +576,6 @@ class TestDrJitAdapter:
     def test_from_drjit_int_array(self) -> None:
         """from_drjit extracts TypeDesc from int array."""
         from drjit import llvm
-
         from typetrace.adapters.drjit import from_drjit
 
         arr = llvm.Int([1, 2, 3])
@@ -616,7 +616,6 @@ class TestDrJitAdapter:
         """make_drjit_sample creates array with correct type."""
         import drjit as dr
         from drjit import llvm
-
         from typetrace.adapters.drjit import make_drjit_sample
         from typetrace.core import TypeDesc
 
@@ -629,7 +628,6 @@ class TestDrJitAdapter:
     def test_make_drjit_sample_infer_type(self) -> None:
         """make_drjit_sample infers type from dtype."""
         from drjit import llvm
-
         from typetrace.adapters.drjit import make_drjit_sample
         from typetrace.core import TypeDesc
 
