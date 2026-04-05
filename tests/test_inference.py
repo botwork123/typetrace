@@ -378,9 +378,8 @@ class TestInferByExecution:
 
         input_type = TypeDesc(
             kind="dataframe",
-            columns=["a"],
+            columns=["a", ...],
             dtypes={"a": "int64"},
-            allow_extra_columns=True,
         )
         result = infer_by_execution(select_known, input_type, operation_name="select_known")
 
@@ -401,9 +400,8 @@ class TestInferByExecution:
 
         input_type = TypeDesc(
             kind="dataframe",
-            columns=["a"],
+            columns=["a", ...],
             dtypes={"a": "int64"},
-            allow_extra_columns=True,
         )
 
         with pytest.raises(
@@ -429,9 +427,8 @@ class TestInferByExecution:
 
         input_type = TypeDesc(
             kind="dataframe",
-            columns=["a"],
+            columns=["a", ...],
             dtypes={"a": "int64"},
-            allow_extra_columns=True,
         )
 
         with pytest.raises(
@@ -461,7 +458,6 @@ class TestInferByExecution:
             kind="dataframe",
             columns=["a"],
             dtypes={"a": "int64"},
-            allow_extra_columns=False,
         )
         result = infer_by_execution(
             identity,

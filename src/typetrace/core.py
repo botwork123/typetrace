@@ -11,6 +11,7 @@ TypeDesc is the universal type descriptor that can represent:
 """
 
 from dataclasses import dataclass, replace
+from types import EllipsisType
 from typing import Any, Callable, Literal
 
 from typetrace.runtime_utils import module_root
@@ -93,8 +94,9 @@ class TypeDesc:
     # Index dimensions (pandas)
     index: Dims | None = None
 
-    # Column names (dataframe)
-    columns: list[str] | None = None
+    # Column names (dataframe/columnar). Use trailing literal ellipsis to denote
+    # partial schema semantics: ["known_a", "known_b", ...].
+    columns: list[str | EllipsisType] | None = None
 
     # Nested type descriptors (opaque classes)
     fields: dict[str, "TypeDesc"] | None = None
@@ -103,8 +105,40 @@ class TypeDesc:
     drjit_type: type | None = None
     static_dims: tuple[int, ...] | None = None
 
-    # For dataframe/columnar partial-schema semantics
+    # Backward-compatible flag for dataframe/columnar partial-schema semantics.
+    # Primary public syntax is trailing ellipsis in `columns`.
     allow_extra_columns: bool = False
+
+    def __post_init__(self) -> None:
+        """Normalize partial-schema semantics for dataframe/columnar descriptors."""
+        if self.kind not in {"dataframe", "columnar"}:
+            return
+
+        columns = list(self.columns) if self.columns is not None else None
+        has_trailing_ellipsis = columns is not None and len(columns) > 0 and columns[-1] is ...
+
+        if columns is not None:
+            for idx, col in enumerate(columns):
+                if col is ... and idx != len(columns) - 1:
+                    raise ValueError("columns must use trailing ellipsis only")
+
+        allow_extra_columns = self.allow_extra_columns or has_trailing_ellipsis
+
+        if allow_extra_columns and columns is not None and not has_trailing_ellipsis:
+            columns.append(...)
+
+        if columns is not self.columns:
+            object.__setattr__(self, "columns", columns)
+        if allow_extra_columns != self.allow_extra_columns:
+            object.__setattr__(self, "allow_extra_columns", allow_extra_columns)
+
+    def known_columns(self) -> list[str] | None:
+        """Return concrete known columns, excluding optional trailing ellipsis marker."""
+        if self.columns is None:
+            return None
+        if self.columns and self.columns[-1] is ...:
+            return [col for col in self.columns[:-1] if isinstance(col, str)]
+        return [col for col in self.columns if isinstance(col, str)]
 
     def with_dims(self, dims: Dims) -> "TypeDesc":
         """Return copy with updated dims."""
@@ -234,7 +268,7 @@ class TypeDesc:
         dtype: str | None = None,
         dims: Dims | None = None,
         shape: tuple[DimValue, ...] | None = None,
-        columns: list[str] | None = None,
+        columns: list[str | EllipsisType] | None = None,
         dtypes: dict[str, str] | None = None,
         index: Dims | None = None,
         fields: dict[str, "TypeDesc"] | None = None,
@@ -252,14 +286,15 @@ class TypeDesc:
             dtype: Element dtype (e.g., "float64")
             dims: Named dimensions for ndarrays
             shape: Positional dimensions for DrJit/numpy
-            columns: Column names for dataframes
+            columns: Column names for dataframes. Use trailing literal
+                ellipsis for partial schema, e.g. ["a", "b", ...].
             dtypes: Per-column dtypes for dataframes
             index: Index dimensions for pandas
             fields: Nested TypeDescs for opaque classes
             drjit_type: Actual DrJit type for codegen
             static_dims: DrJit static dimensions
-            allow_extra_columns: For dataframe/columnar descriptors, whether
-                unknown extra columns may exist beyond known columns/dtypes.
+            allow_extra_columns: Backward-compatible alias for partial schema.
+                Preferred API is trailing ellipsis in `columns`.
 
         Returns:
             TypeDesc with kind inferred from concrete_type

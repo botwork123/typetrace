@@ -126,26 +126,49 @@ class TestTypeDesc:
             t.dims = {"y": 20}  # type: ignore
 
     def test_dataframe_partial_schema_flag_defaults_false(self) -> None:
-        """allow_extra_columns defaults to False for dataframe descriptors."""
+        """Exact schema remains default without ellipsis/flag."""
         t = TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "int64"})
         assert t.allow_extra_columns is False
+        assert t.columns == ["a"]
 
-    def test_dataframe_partial_schema_flag_roundtrip(self) -> None:
-        """allow_extra_columns persists in dataclass construction/equality."""
-        left = TypeDesc(
+    @pytest.mark.parametrize(
+        "columns,allow_extra_columns,expected_columns,expected_allow_extra",
+        [
+            (["a", ...], False, ["a", ...], True),
+            (["a", ...], True, ["a", ...], True),
+            (["a"], True, ["a", ...], True),
+            ([...], False, [...], True),
+            (["a"], False, ["a"], False),
+        ],
+    )
+    def test_dataframe_partial_schema_normalization(
+        self,
+        columns: list,
+        allow_extra_columns: bool,
+        expected_columns: list,
+        expected_allow_extra: bool,
+    ) -> None:
+        """Ellipsis is primary API; allow_extra_columns remains backward-compatible."""
+        t = TypeDesc(
             kind="dataframe",
-            columns=["a"],
+            columns=columns,
             dtypes={"a": "int64"},
-            allow_extra_columns=True,
+            allow_extra_columns=allow_extra_columns,
         )
-        right = TypeDesc(
-            kind="dataframe",
-            columns=["a"],
-            dtypes={"a": "int64"},
-            allow_extra_columns=True,
-        )
-        assert left.allow_extra_columns is True
-        assert left == right
+        assert t.columns == expected_columns
+        assert t.allow_extra_columns is expected_allow_extra
+
+    @pytest.mark.parametrize(
+        "columns",
+        [
+            ["a", ..., "b"],
+            ["a", ..., ...],
+        ],
+    )
+    def test_dataframe_partial_schema_ellipsis_must_be_trailing(self, columns: list) -> None:
+        """Ellipsis marker must only appear as final columns entry."""
+        with pytest.raises(ValueError, match="trailing ellipsis"):
+            TypeDesc(kind="dataframe", columns=columns)
 
 
 class TestTypeDescFromValue:

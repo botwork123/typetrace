@@ -78,7 +78,11 @@ from typetrace import TypeDesc
 from typetrace.inference import infer_by_execution
 import pandas as pd
 
-left_t = TypeDesc.from_value(left_df)
+left_t = TypeDesc(
+    kind='dataframe',
+    columns=['id', 'value', ...],  # ellipsis => known columns + unknown extras
+    dtypes={'id': 'int64', 'value': 'float64'},
+)
 right_t = TypeDesc.from_value(right_df)
 
 # Let pandas figure out the output type
