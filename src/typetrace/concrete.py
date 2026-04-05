@@ -189,11 +189,13 @@ def _handle_unary_or_method(input_type: type, operation: str) -> type | None:
 
 
 @overload
-def concrete_transform(input_type: type, operation: str) -> type | None: ...
+def concrete_transform(input_type: type, operation: str) -> type | None:
+    ...
 
 
 @overload
-def concrete_transform(input_type: tuple[type, type], operation: str) -> type | None: ...
+def concrete_transform(input_type: tuple[type, type], operation: str) -> type | None:
+    ...
 
 
 def concrete_transform(input_type: type | tuple[type, type], operation: str) -> type | None:
