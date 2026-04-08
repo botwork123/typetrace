@@ -200,8 +200,8 @@ def infer_by_execution(
             samples.append(type_desc.make_sample())
         except Exception as exc:
             raise ValueError(
-                f"infer_by_execution({operation}) sample build failed for "
-                f"input[{index}] (kind={type_desc.kind}): {exc}"
+                f"infer_by_execution({operation}) sample-build failed for "
+                f"input index {index} (input[{index}], kind={type_desc.kind}): {exc}"
             ) from exc
 
     try:
