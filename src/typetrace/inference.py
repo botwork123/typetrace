@@ -141,6 +141,15 @@ def infer_types(
     return resolved
 
 
+def _callable_label(fn: Callable[..., Any]) -> str:
+    """Return readable callable label for error messages."""
+    if hasattr(fn, "__qualname__") and hasattr(fn, "__module__"):
+        return f"{fn.__module__}.{fn.__qualname__}"
+    if hasattr(fn, "__name__"):
+        return str(fn.__name__)
+    return repr(fn)
+
+
 def infer_by_execution(
     fn: Callable,
     *input_types: TypeDesc,
@@ -169,7 +178,7 @@ def infer_by_execution(
     Returns:
         TypeDesc extracted from function's output
     """
-    operation = operation_name or getattr(fn, "__name__", repr(fn))
+    operation = operation_name or _callable_label(fn)
 
     if require_exact_dataframe_schema:
         for index, type_desc in enumerate(input_types):
@@ -185,14 +194,14 @@ def infer_by_execution(
                     "requires exact full column set."
                 )
 
-    samples = []
+    samples: list[Any] = []
     for index, type_desc in enumerate(input_types):
         try:
             samples.append(type_desc.make_sample())
-        except Exception as exc:  # pragma: no cover - exercised by tests
+        except Exception as exc:
             raise ValueError(
-                f"infer_by_execution({operation}) sample build failed for "
-                f"input[{index}] (kind={type_desc.kind}): {exc}"
+                f"infer_by_execution({operation}) sample-build failed for "
+                f"input index {index} (input[{index}], kind={type_desc.kind}): {exc}"
             ) from exc
 
     try:
@@ -200,8 +209,15 @@ def infer_by_execution(
     except Exception as exc:
         raise ValueError(f"infer_by_execution({operation}) execution failed: {exc}") from exc
 
-    _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
-    return TypeDesc.from_value(result)
+    try:
+        _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
+    except Exception as exc:
+        raise ValueError(f"infer_by_execution({operation}) handoff-check failed: {exc}") from exc
+
+    try:
+        return TypeDesc.from_value(result)
+    except Exception as exc:
+        raise ValueError(f"infer_by_execution({operation}) output-extract failed: {exc}") from exc
 
 
 def _validate_execution_handoff(

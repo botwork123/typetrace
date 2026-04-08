@@ -190,6 +190,29 @@ class TestPandasAdapter:
         assert result["a"].iloc[0] == 0.0
         assert result["b"].iloc[1] == 1
 
+    @pytest.mark.parametrize(
+        "dtype,column,expected",
+        [
+            ("uint32", "u", 1),
+            ("datetime64[ns]", "t", "2024-01-02"),
+            ("utf8", "s", "v_0"),
+        ],
+    )
+    def test_make_dataframe_sample_dtype_branches(
+        self, dtype: str, column: str, expected: int | str
+    ) -> None:
+        """make_dataframe_sample supports uint, datetime, and utf8-like dtypes."""
+        from typetrace.adapters.pandas import make_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(kind="dataframe", columns=[column], dtypes={column: dtype})
+        result = make_dataframe_sample(t)
+
+        if dtype == "datetime64[ns]":
+            assert str(result[column].iloc[1].date()) == expected
+        else:
+            assert result[column].iloc[1 if dtype == "uint32" else 0] == expected
+
     def test_make_dataframe_sample_no_columns(self) -> None:
         """make_dataframe_sample raises ValueError without columns."""
         from typetrace.adapters.pandas import make_dataframe_sample
