@@ -3,6 +3,7 @@
 from importlib.util import find_spec
 
 import pytest
+
 from typetrace.concrete import concrete_transform
 
 # Conditional imports with markers

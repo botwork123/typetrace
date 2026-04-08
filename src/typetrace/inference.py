@@ -180,8 +180,7 @@ def infer_by_execution(
             samples.append(type_desc.make_sample())
         except Exception as exc:
             raise ValueError(
-                f"infer_by_execution sample-build failed for {fn_label} "
-                f"at input index {i}: {exc}"
+                f"infer_by_execution sample-build failed for {fn_label} at input index {i}: {exc}"
             ) from exc
 
     try:
