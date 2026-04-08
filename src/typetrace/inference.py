@@ -155,6 +155,8 @@ def infer_by_execution(
     *input_types: TypeDesc,
     expected_output_traits: ExecutionTraits | None = None,
     allow_device_copy: bool = False,
+    require_exact_dataframe_schema: bool = False,
+    operation_name: str | None = None,
     **kwargs: Any,
 ) -> TypeDesc:
     """
@@ -168,35 +170,54 @@ def infer_by_execution(
         *input_types: TypeDescs for inputs
         expected_output_traits: Optional runtime execution contract
         allow_device_copy: Allow cross-device handoff if transfer copy is required
+        require_exact_dataframe_schema: Fail fast if any dataframe input uses
+            partial schema semantics (trailing ellipsis in `columns`).
+        operation_name: Optional operation context for error messages.
         **kwargs: Additional keyword arguments for fn
 
     Returns:
         TypeDesc extracted from function's output
     """
-    fn_label = _callable_label(fn)
+    operation = operation_name or _callable_label(fn)
+
+    if require_exact_dataframe_schema:
+        for index, type_desc in enumerate(input_types):
+            has_trailing_ellipsis = (
+                type_desc.columns is not None
+                and len(type_desc.columns) > 0
+                and type_desc.columns[-1] is ...
+            )
+            if type_desc.kind == "dataframe" and has_trailing_ellipsis:
+                raise ValueError(
+                    f"infer_by_execution({operation}): input[{index}] has partial "
+                    "dataframe schema (columns end with ...); operation "
+                    "requires exact full column set."
+                )
+
     samples: list[Any] = []
-    for i, type_desc in enumerate(input_types):
+    for index, type_desc in enumerate(input_types):
         try:
             samples.append(type_desc.make_sample())
         except Exception as exc:
             raise ValueError(
-                f"infer_by_execution sample-build failed for {fn_label} at input index {i}: {exc}"
+                f"infer_by_execution({operation}) sample build failed for "
+                f"input[{index}] (kind={type_desc.kind}): {exc}"
             ) from exc
 
     try:
         result = fn(*samples, **kwargs)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution execution failed for {fn_label}: {exc}") from exc
+        raise ValueError(f"infer_by_execution({operation}) execution failed: {exc}") from exc
 
     try:
         _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution handoff-check failed for {fn_label}: {exc}") from exc
+        raise ValueError(f"infer_by_execution({operation}) handoff-check failed: {exc}") from exc
 
     try:
         return TypeDesc.from_value(result)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution output-extract failed for {fn_label}: {exc}") from exc
+        raise ValueError(f"infer_by_execution({operation}) output-extract failed: {exc}") from exc
 
 
 def _validate_execution_handoff(

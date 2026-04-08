@@ -104,13 +104,14 @@ def make_dataframe_sample(type_desc: TypeDesc) -> Any:
     """Create deterministic pandas DataFrame sample from TypeDesc."""
     import pandas as pd
 
-    if type_desc.columns is None:
+    known_columns = type_desc.known_columns()
+    if known_columns is None:
         raise ValueError("Cannot make DataFrame sample without columns")
 
     index = _build_index(type_desc.index, _default_sample_size())
     row_count = len(index)
     dtypes = type_desc.dtypes or {}
-    data = {col: _series_values(dtypes.get(col, "float64"), row_count) for col in type_desc.columns}
+    data = {col: _series_values(dtypes.get(col, "float64"), row_count) for col in known_columns}
     return pd.DataFrame(data, index=index)
 
 

@@ -147,6 +147,50 @@ class TestPandasAdapter:
         assert result["a"].iloc[3] == 0.3333333333333333
 
     @pytest.mark.parametrize(
+        "columns,dtypes,expected_columns",
+        [
+            (["a", ...], {"a": "int64"}, ["a"]),
+            (["a", "b", ...], {"a": "float64", "b": "bool"}, ["a", "b"]),
+            (["a"], {"a": "int64"}, ["a"]),
+        ],
+    )
+    def test_make_dataframe_sample_partial_schema_known_columns_only(
+        self,
+        columns: list,
+        dtypes: dict[str, str],
+        expected_columns: list[str],
+    ) -> None:
+        """Partial schema samples only materialize known columns (no physical ellipsis column)."""
+        from typetrace.adapters.pandas import make_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(
+            kind="dataframe",
+            columns=columns,
+            dtypes=dtypes,
+        )
+        result = make_dataframe_sample(t)
+
+        assert list(result.columns) == expected_columns
+        assert "..." not in result.columns
+
+    def test_make_dataframe_sample_exact_schema_unchanged(self) -> None:
+        """Exact-schema samples keep prior behavior."""
+        from typetrace.adapters.pandas import make_dataframe_sample
+        from typetrace.core import TypeDesc
+
+        t = TypeDesc(
+            kind="dataframe",
+            columns=["a", "b"],
+            dtypes={"a": "float64", "b": "int32"},
+        )
+        result = make_dataframe_sample(t)
+
+        assert list(result.columns) == ["a", "b"]
+        assert result["a"].iloc[0] == 0.0
+        assert result["b"].iloc[1] == 1
+
+    @pytest.mark.parametrize(
         "dtype,column,expected",
         [
             ("uint32", "u", 1),
