@@ -109,6 +109,21 @@ context = TypeContext(bindings={'N': 1000})
 output_type = infer_types(root_node, context)
 ```
 
+### Shape-contract requirement helper
+
+Downstream systems like dag-core can delegate shape/schema contract checks to typetrace:
+
+```python
+from typetrace import TypeDesc, requires_shape_contract
+
+def node_requires_contract(output_type: TypeDesc) -> bool:
+    return requires_shape_contract(output_type)
+```
+
+`requires_shape_contract` returns `True` for shape/schema-bearing kinds
+(`ndarray`, `dataset`, `dataframe`, `series`, `columnar`, `drjit`) and `False`
+for non-shape kinds (`scalar`, `class`, `recursive`).
+
 ## Agent contract
 
 `AGENTS.md` is the canonical implementation contract for architecture, testing, and quality gates.

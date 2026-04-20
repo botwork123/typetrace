@@ -56,6 +56,21 @@ class TestForType:
         td = TypeDesc.for_type(CustomClass)
         assert td.kind == "class"
 
+    @pytest.mark.parametrize(
+        "concrete_type,expected_kind",
+        [
+            (type("DataFrame", (), {"__module__": "polars"}), "dataframe"),
+            (type("Series", (), {"__module__": "polars"}), "series"),
+            (type("Table", (), {"__module__": "pyarrow"}), "columnar"),
+            (type("FloatArray", (), {"__module__": "drjit"}), "drjit"),
+        ],
+    )
+    def test_kind_for_type_optional_module_roots(
+        self, concrete_type: type, expected_kind: str
+    ) -> None:
+        td = TypeDesc.for_type(concrete_type)
+        assert td.kind == expected_kind
+
 
 class TestDatasetSample:
     """Test make_sample for Dataset kind."""

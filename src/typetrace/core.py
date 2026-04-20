@@ -41,6 +41,23 @@ DimValue = int | Symbol
 Dims = dict[str, DimValue]
 
 
+_SHAPE_CONTRACT_KINDS = frozenset(
+    {
+        "ndarray",
+        "dataset",
+        "dataframe",
+        "series",
+        "columnar",
+        "drjit",
+    }
+)
+
+
+def requires_shape_contract(type_desc: "TypeDesc") -> bool:
+    """Return whether the type requires an explicit shape/schema contract."""
+    return type_desc.kind in _SHAPE_CONTRACT_KINDS
+
+
 @dataclass(frozen=True)
 class TypeDesc:
     """
