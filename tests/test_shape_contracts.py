@@ -1,6 +1,7 @@
 """Tests for shape-contract capability helpers."""
 
 import pytest
+
 from typetrace.core import TypeDesc, requires_shape_contract
 
 
