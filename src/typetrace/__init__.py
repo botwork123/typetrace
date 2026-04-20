@@ -8,7 +8,7 @@ Core concepts:
 """
 
 from typetrace.concrete import concrete_transform
-from typetrace.core import Dims, Symbol, TypeDesc
+from typetrace.core import Dims, Symbol, TypeDesc, requires_shape_contract
 from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
 from typetrace.inference import TypeContext, infer_types
 from typetrace.layout_ops import (
@@ -40,6 +40,7 @@ __all__ = [
     "broadcast",
     "add_dim",
     "reduce_dim",
+    "requires_shape_contract",
 ]
 
 __version__ = "0.1.3"
