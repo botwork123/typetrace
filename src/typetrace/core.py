@@ -163,7 +163,7 @@ def _canonical(value: Any) -> Any:
         hash(value)
     except TypeError as exc:
         raise TypeDescValidationError(f"unsupported canonical value: {type(value)!r}") from exc
-    return ("hashable", type(value).__module__, type(value).__qualname__, repr(value))
+    return ("hashable", type(value).__module__, type(value).__qualname__, value)
 
 
 _SHAPE_CONTRACT_KINDS = frozenset(
