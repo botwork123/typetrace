@@ -486,6 +486,9 @@ class TypeDesc:
         def visit(value: Any) -> None:
             if isinstance(value, Symbol):
                 found.add(value.name)
+            elif isinstance(value, TypeDesc):
+                for field in value.__dataclass_fields__:
+                    visit(getattr(value, field))
             elif isinstance(value, Mapping):
                 for key, item in value.items():
                     visit(key)

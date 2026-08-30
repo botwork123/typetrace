@@ -126,6 +126,15 @@ def test_bind_is_complete_and_rejects_unknown_or_conflicting_bindings() -> None:
         descriptor.bind({"N": -1})
 
 
+def test_bind_discovers_symbols_only_in_nested_descriptors() -> None:
+    descriptor = TypeDesc(
+        "record",
+        fields=(("nested", TypeDesc("numpy.ndarray", shape=(Symbol("N"),))),),
+    )
+    bound = descriptor.bind({"N": 4})
+    assert bound.fields[0][1].shape == (4,)
+
+
 def test_symbol_names_are_validated() -> None:
     with pytest.raises(TypeDescValidationError):
         Symbol("")
