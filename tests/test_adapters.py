@@ -426,7 +426,7 @@ class TestPolarsAdapter:
         [
             ((("a", "b"), (("a", "Float64"), ("b", "Int64")), ("Float64", "Int64"))),
             ((("x",), (("x", "Boolean"),), ("Boolean",))),
-            ((("c", "d"), (), ("Float64", "Float64"))),  # Default dtype
+            ((("c", "d"), (("c", "Float64"), ("d", "Float64")), ("Float64", "Float64"))),
         ],
     )
     def test_make_polars_dataframe_sample(
@@ -542,7 +542,7 @@ class TestArrowAdapter:
         [
             ((("a", "b"), (("a", "float64"), ("b", "int64")), ("double", "int64"))),
             ((("x",), (("x", "bool"),), ("bool",))),
-            ((("c", "d"), (), ("double", "double"))),  # Default dtype
+            ((("c", "d"), (("c", "float64"), ("d", "float64")), ("double", "double"))),
             ((("s",), (("s", "string"),), ("string",))),
         ],
     )

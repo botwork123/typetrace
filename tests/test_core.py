@@ -178,7 +178,11 @@ class TestTypeDesc:
         self, columns: tuple, expected_known: list
     ) -> None:
         """Trailing ellipsis is the only partial-schema signal."""
-        t = TypeDesc(kind="pandas.DataFrame", columns=columns, dtypes=(("a", "int64"),))
+        t = TypeDesc(
+            kind="pandas.DataFrame",
+            columns=columns,
+            dtypes=() if columns == (...,) else (("a", "int64"),),
+        )
         assert t.known_columns() == expected_known
 
     @pytest.mark.parametrize(

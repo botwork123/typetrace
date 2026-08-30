@@ -89,7 +89,10 @@ def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
         try:
             items = tuple(
                 sorted(
-                    ((key, _freeze_metadata(item, seen)) for key, item in value.items()),
+                    (
+                        (_validate_metadata_key(key), _freeze_metadata(item, seen))
+                        for key, item in value.items()
+                    ),
                     key=repr,
                 )
             )
@@ -111,6 +114,16 @@ def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
     except TypeError as exc:
         raise TypeDescValidationError("metadata contains an unhashable value") from exc
     return cast(Hashable, value)
+
+
+def _validate_metadata_key(key: Any) -> Hashable:
+    """Validate a mapping key while retaining its semantic value."""
+    _canonical(key)
+    try:
+        hash(key)
+    except TypeError as exc:
+        raise TypeDescValidationError("metadata contains an unhashable key") from exc
+    return cast(Hashable, key)
 
 
 def _canonical(value: Any) -> Any:
@@ -243,6 +256,13 @@ class TypeDesc:
             "metadata": metadata,
         }.items():
             object.__setattr__(self, name, value)
+        if self.dtypes is not None and self.columns is not None:
+            declared = {column for column in self.columns if column is not ...}
+            observed = {column for column, _ in self.dtypes}
+            if not observed <= declared:
+                raise TypeDescValidationError("dtypes contains a column not present in columns")
+            if ... not in self.columns and observed != declared:
+                raise TypeDescValidationError("dtypes must cover every declared column")
         if self.dtype is not None and not isinstance(self.dtype, str):
             raise TypeDescValidationError("dtype must be a string or None")
         if self.static_dims is not None:
@@ -363,18 +383,25 @@ class TypeDesc:
             return None
         result: list[tuple[Hashable, str]] = []
         keys: set[Hashable] = set()
-        for index, pair in enumerate(value):
-            if len(pair) != 2 or not isinstance(pair[1], str):
-                raise TypeDescValidationError(f"{path}[{index}] must be (hashable, str)")
-            key, dtype = pair
-            try:
-                hash(key)
-            except TypeError as exc:
-                raise TypeDescValidationError(f"{path}[{index}] key is unhashable") from exc
-            if key in keys:
-                raise TypeDescValidationError(f"{path} contains duplicate key {key!r}")
-            keys.add(key)
-            result.append((key, dtype))
+        try:
+            pairs = enumerate(value)
+            for index, pair in pairs:
+                if len(pair) != 2 or not isinstance(pair[1], str):
+                    raise TypeDescValidationError(f"{path}[{index}] must be (hashable, str)")
+                key, dtype = pair
+                _canonical(key)
+                try:
+                    hash(key)
+                except TypeError as exc:
+                    raise TypeDescValidationError(f"{path}[{index}] key is unhashable") from exc
+                if key in keys:
+                    raise TypeDescValidationError(f"{path} contains duplicate key {key!r}")
+                keys.add(key)
+                result.append((key, dtype))
+        except TypeDescValidationError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise TypeDescValidationError(f"{path} must be a sequence of pairs") from exc
         return tuple(result)
 
     @classmethod
@@ -383,18 +410,25 @@ class TypeDesc:
             return None
         result: list[tuple[Hashable, TypeDesc]] = []
         keys: set[Hashable] = set()
-        for index, pair in enumerate(value):
-            if len(pair) != 2 or not isinstance(pair[1], TypeDesc):
-                raise TypeDescValidationError(f"fields[{index}] must be (hashable, TypeDesc)")
-            key, descriptor = pair
-            try:
-                hash(key)
-            except TypeError as exc:
-                raise TypeDescValidationError(f"fields[{index}] key is unhashable") from exc
-            if key in keys:
-                raise TypeDescValidationError(f"fields contains duplicate key {key!r}")
-            keys.add(key)
-            result.append((key, descriptor))
+        try:
+            pairs = enumerate(value)
+            for index, pair in pairs:
+                if len(pair) != 2 or not isinstance(pair[1], TypeDesc):
+                    raise TypeDescValidationError(f"fields[{index}] must be (hashable, TypeDesc)")
+                key, descriptor = pair
+                _canonical(key)
+                try:
+                    hash(key)
+                except TypeError as exc:
+                    raise TypeDescValidationError(f"fields[{index}] key is unhashable") from exc
+                if key in keys:
+                    raise TypeDescValidationError(f"fields contains duplicate key {key!r}")
+                keys.add(key)
+                result.append((key, descriptor))
+        except TypeDescValidationError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise TypeDescValidationError("fields must be a sequence of pairs") from exc
         return tuple(result)
 
     @classmethod
