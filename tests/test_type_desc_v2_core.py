@@ -82,6 +82,36 @@ def test_mutable_inputs_are_frozen_recursively() -> None:
     assert descriptor.metadata == (("payload", (1, (("nested", 2),))),)
 
 
+def test_every_structural_container_is_snapshotted() -> None:
+    shape = [2, 3]
+    index = [["row", 2, ["r0", "r1"]]]
+    columns = ["a", "b"]
+    dtypes = [["a", "float64"], ["b", "int64"]]
+    fields = [["value", TypeDesc("scalar", dtype="float64")]]
+    static_dims = [2, 3]
+    descriptor = TypeDesc(
+        "example.container",
+        shape=shape,
+        index=index,
+        columns=columns,
+        dtypes=dtypes,
+        fields=fields,
+        static_dims=static_dims,
+    )
+    shape[:] = [9]
+    index[0][2].append("r2")
+    columns.append("c")
+    dtypes[0][1] = "int64"
+    fields.append(["other", TypeDesc("scalar")])
+    static_dims.append(4)
+    assert descriptor.shape == (2, 3)
+    assert descriptor.index == (("row", 2, ("r0", "r1")),)
+    assert descriptor.columns == ("a", "b")
+    assert descriptor.dtypes == (("a", "float64"), ("b", "int64"))
+    assert descriptor.fields == (("value", TypeDesc("scalar", dtype="float64")),)
+    assert descriptor.static_dims == (2, 3)
+
+
 def test_kind_is_nominal_and_canonical_identity_is_tagged() -> None:
     numpy = TypeDesc("numpy.ndarray", shape=(2,), dtype="float64")
     xarray = TypeDesc("xarray.DataArray", shape=(2,), dtype="float64")
@@ -268,8 +298,11 @@ def test_canonical_and_binding_edge_paths() -> None:
 
 def test_arbitrary_hashable_labels_are_structural() -> None:
     class Label:
+        def __init__(self) -> None:
+            self.value = "before"
+
         def __repr__(self) -> str:
-            return "Label()"
+            return f"Label({self.value})"
 
         def __hash__(self) -> int:
             return 1
@@ -282,3 +315,8 @@ def test_arbitrary_hashable_labels_are_structural() -> None:
     other = TypeDesc("pandas.DataFrame", columns=(other_label,), dtypes=((other_label, "float64"),))
     assert descriptor != other
     assert descriptor.fingerprint() != other.fingerprint()
+    before_hash = hash(descriptor)
+    before_fingerprint = descriptor.fingerprint()
+    label.value = "after"
+    assert hash(descriptor) == before_hash
+    assert descriptor.fingerprint() == before_fingerprint
