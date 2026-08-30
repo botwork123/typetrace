@@ -232,3 +232,9 @@ def test_canonical_and_binding_edge_paths() -> None:
         TypeDesc("custom", metadata=(("x", 1), ("x", 2)))
     assert TypeDesc("custom", metadata=None).metadata == ()
     assert TypeDesc("drjit.Array", static_dims=(1, 2)).static_dims == (1, 2)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("drjit.Array", static_dims=1)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", metadata=1)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", metadata=[1])

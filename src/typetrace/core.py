@@ -266,12 +266,16 @@ class TypeDesc:
         if self.dtype is not None and not isinstance(self.dtype, str):
             raise TypeDescValidationError("dtype must be a string or None")
         if self.static_dims is not None:
+            try:
+                static_dims = tuple(self.static_dims)
+            except TypeError as exc:
+                raise TypeDescValidationError("static_dims must be a sequence") from exc
             if any(
                 not isinstance(size, int) or isinstance(size, bool) or size < 0
-                for size in self.static_dims
+                for size in static_dims
             ):
                 raise TypeDescValidationError("static_dims must contain non-negative integers")
-            object.__setattr__(self, "static_dims", tuple(self.static_dims))
+            object.__setattr__(self, "static_dims", static_dims)
         if self.drjit_type is not None and not isinstance(self.drjit_type, type):
             raise TypeDescValidationError("drjit_type must be a type or None")
         if self.kind == "scalar" and (self.shape is not None or self.dims is not None):
@@ -437,14 +441,20 @@ class TypeDesc:
         if items is None:
             return ()
         result: dict[str, Hashable] = {}
-        for index, pair in enumerate(items):
-            if len(pair) != 2 or not isinstance(pair[0], str):
-                raise TypeDescValidationError(f"metadata[{index}] must be (str, hashable)")
-            key, raw = pair
-            frozen = _freeze_metadata(raw)
-            if key in result:
-                raise TypeDescValidationError(f"metadata contains duplicate key {key!r}")
-            result[key] = frozen
+        try:
+            pairs = enumerate(items)
+            for index, pair in pairs:
+                if len(pair) != 2 or not isinstance(pair[0], str):
+                    raise TypeDescValidationError(f"metadata[{index}] must be (str, hashable)")
+                key, raw = pair
+                frozen = _freeze_metadata(raw)
+                if key in result:
+                    raise TypeDescValidationError(f"metadata contains duplicate key {key!r}")
+                result[key] = frozen
+        except TypeDescValidationError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise TypeDescValidationError("metadata must be a sequence of pairs") from exc
         return tuple(sorted(result.items()))
 
     def __hash__(self) -> int:
