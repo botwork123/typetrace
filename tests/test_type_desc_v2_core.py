@@ -255,3 +255,4 @@ def test_arbitrary_hashable_labels_are_structural() -> None:
     other_label = Label()
     other = TypeDesc("pandas.DataFrame", columns=(other_label,), dtypes=((other_label, "float64"),))
     assert descriptor != other
+    assert descriptor.fingerprint() != other.fingerprint()

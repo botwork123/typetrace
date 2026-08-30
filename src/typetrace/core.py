@@ -163,7 +163,10 @@ def _canonical(value: Any) -> Any:
         hash(value)
     except TypeError as exc:
         raise TypeDescValidationError(f"unsupported canonical value: {type(value)!r}") from exc
-    return ("hashable", type(value).__module__, type(value).__qualname__, value)
+    # Unsupported custom hashables have no portable value encoding. Preserve
+    # their object identity so unequal labels with identical repr/hash values
+    # cannot collapse in structural identity or fingerprints.
+    return ("hashable", type(value).__module__, type(value).__qualname__, id(value), value)
 
 
 _SHAPE_CONTRACT_KINDS = frozenset(
