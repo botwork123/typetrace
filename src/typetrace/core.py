@@ -35,7 +35,10 @@ class Symbol:
     name: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.name) is None:
+        if (
+            not isinstance(self.name, str)
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.name) is None
+        ):
             raise TypeDescValidationError(f"invalid symbol name: {self.name!r}")
 
     def __repr__(self) -> str:
@@ -51,7 +54,9 @@ Dims = tuple[tuple[str, DimValue, tuple[Hashable, ...] | None], ...]
 class TypeDescError(ValueError):
     """Base class for structural TypeDesc failures."""
 
-    def __init__(self, message: str, *, operation: str | None = None, path: tuple[str | int, ...] = ()) -> None:
+    def __init__(
+        self, message: str, *, operation: str | None = None, path: tuple[str | int, ...] = ()
+    ) -> None:
         self.operation = operation
         self.path = path
         context = f" at {'.'.join(map(str, path))}" if path else ""
@@ -109,13 +114,31 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-def _freeze_metadata(value: Any) -> Hashable:
+def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
     """Convert metadata containers to deterministic immutable tuples."""
+    seen = _seen if _seen is not None else set()
     if isinstance(value, Mapping):
-        items = tuple(sorted((key, _freeze_metadata(item)) for key, item in value.items()))
+        object_id = id(value)
+        if object_id in seen:
+            raise TypeDescValidationError("metadata contains a cycle")
+        seen.add(object_id)
+        try:
+            items = tuple(
+                sorted((key, _freeze_metadata(item, seen)) for key, item in value.items())
+            )
+        finally:
+            seen.remove(object_id)
         return items
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_metadata(item) for item in value)
+        object_id = id(value)
+        if object_id in seen:
+            raise TypeDescValidationError("metadata contains a cycle")
+        seen.add(object_id)
+        try:
+            return tuple(_freeze_metadata(item, seen) for item in value)
+        finally:
+            seen.remove(object_id)
+    _canonical(value)
     try:
         hash(value)
     except TypeError as exc:
@@ -143,16 +166,19 @@ def _canonical(value: Any) -> Any:
     if isinstance(value, Symbol):
         return ("symbol", value.name)
     if isinstance(value, TypeDesc):
-        return ("typedesc", tuple(_canonical(getattr(value, field)) for field in value.__dataclass_fields__))
+        return (
+            "typedesc",
+            tuple(_canonical(getattr(value, field)) for field in value.__dataclass_fields__),
+        )
     if isinstance(value, Mapping):
         items = ((_canonical(key), _canonical(item)) for key, item in value.items())
         return ("mapping", tuple(sorted(items, key=repr)))
     if isinstance(value, (list, tuple)):
         return ("sequence", tuple(_canonical(item) for item in value))
+    if value is Ellipsis:
+        return ("ellipsis",)
     if isinstance(value, type):
         return ("type", value.__module__, value.__qualname__)
-    if isinstance(value, Hashable):
-        return ("hashable", type(value).__module__, type(value).__qualname__, repr(value))
     raise TypeDescValidationError(f"unsupported canonical value: {type(value)!r}")
 
 
@@ -261,6 +287,33 @@ class TypeDesc:
             raise TypeDescValidationError("drjit_type must be a type or None")
         if self.kind == "scalar" and (self.shape is not None or self.dims is not None):
             raise TypeDescValidationError("scalar cannot declare dimensions or shape")
+        payloads = {
+            "scalar": {"dtype", "metadata"},
+            "record": {"fields", "metadata"},
+            "opaque": {"metadata"},
+            "numpy.ndarray": {"dims", "shape", "dtype", "metadata"},
+            "xarray.DataArray": {"dims", "shape", "dtype", "metadata"},
+            "xarray.Dataset": {"dims", "fields", "metadata"},
+            "pandas.Series": {"shape", "dtype", "index", "metadata"},
+            "pandas.DataFrame": {"shape", "index", "columns", "dtypes", "metadata"},
+            "polars.Series": {"shape", "dtype", "index", "metadata"},
+            "polars.DataFrame": {"shape", "index", "columns", "dtypes", "metadata"},
+            "pyarrow.Array": {"shape", "dtype", "metadata"},
+            "pyarrow.Table": {"shape", "columns", "dtypes", "metadata"},
+            "drjit.Array": {"shape", "dtype", "drjit_type", "static_dims", "metadata"},
+        }
+        allowed = payloads.get(self.kind)
+        if allowed is not None:
+            populated = {
+                name
+                for name in self.__dataclass_fields__
+                if name not in {"kind", "metadata"} and getattr(self, name) is not None
+            }
+            illegal = populated - (allowed - {"metadata"})
+            if illegal:
+                raise TypeDescValidationError(
+                    f"kind {self.kind!r} cannot declare {sorted(illegal)!r}"
+                )
 
     @staticmethod
     def _normalize_shape(value: Any, path: str) -> tuple[DimValue, ...] | None:
@@ -275,7 +328,9 @@ class TypeDesc:
             elif isinstance(size, int) and size >= 0:
                 result.append(size)
             else:
-                raise TypeDescValidationError(f"{path}[{index}] must be a non-negative integer or Symbol")
+                raise TypeDescValidationError(
+                    f"{path}[{index}] must be a non-negative integer or Symbol"
+                )
         return tuple(result)
 
     @classmethod
@@ -301,7 +356,11 @@ class TypeDesc:
             names.add(name)
             cls._validate_size(size, f"{path}[{index}]")
             normalized_labels = cls._normalize_hashables(labels, f"{path}[{index}].labels")
-            if normalized_labels is not None and isinstance(size, int) and len(normalized_labels) != size:
+            if (
+                normalized_labels is not None
+                and isinstance(size, int)
+                and len(normalized_labels) != size
+            ):
                 raise TypeDescValidationError(f"{path}[{index}].labels length disagrees with size")
             result.append((name, size, normalized_labels))
         return tuple(result)
@@ -406,7 +465,9 @@ class TypeDesc:
                     raise TypeDescConflictError(f"binding for {value.name!r} is negative")
                 return bound
             if isinstance(value, TypeDesc):
-                nested_bindings = {name: item for name, item in bindings.items() if name in value._symbols()}
+                nested_bindings = {
+                    name: item for name, item in bindings.items() if name in value._symbols()
+                }
                 return value.bind(nested_bindings)
             if isinstance(value, Mapping):
                 return {key: bind_value(item) for key, item in value.items()}

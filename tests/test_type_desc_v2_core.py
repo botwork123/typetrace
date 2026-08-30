@@ -14,8 +14,17 @@ from typetrace.core import (
 
 def test_constructor_has_exact_frozen_schema() -> None:
     assert [field.name for field in fields(TypeDesc)] == [
-        "kind", "dims", "shape", "dtype", "dtypes", "index", "columns",
-        "fields", "drjit_type", "static_dims", "metadata",
+        "kind",
+        "dims",
+        "shape",
+        "dtype",
+        "dtypes",
+        "index",
+        "columns",
+        "fields",
+        "drjit_type",
+        "static_dims",
+        "metadata",
     ]
     assert TypeDesc("scalar", dtype="float64").metadata == ()
 
@@ -24,8 +33,9 @@ def test_constructor_has_exact_frozen_schema() -> None:
     "descriptor",
     [
         TypeDesc("numpy.ndarray", dims=(("x", 2, ("a", "b")),), dtype="float64"),
-        TypeDesc("pandas.DataFrame", index=(("row", 2, None),), columns=("a",),
-                 dtypes=(("a", "int64"),)),
+        TypeDesc(
+            "pandas.DataFrame", index=(("row", 2, None),), columns=("a",), dtypes=(("a", "int64"),)
+        ),
         TypeDesc("record", fields=(("value", TypeDesc("scalar", dtype="int64")),)),
         TypeDesc("opaque", metadata=(("source", ("test", 1)),)),
     ],
@@ -56,16 +66,17 @@ def test_kind_is_nominal_and_canonical_identity_is_tagged() -> None:
 
 
 def test_metadata_order_is_canonical_but_structural_order_is_semantic() -> None:
-    left = TypeDesc("record", fields=(("a", TypeDesc("scalar", dtype="int64")),),
-                    metadata=(("z", 1), ("a", 2)))
-    right = TypeDesc("record", fields=(("a", TypeDesc("scalar", dtype="int64")),),
-                     metadata=(("a", 2), ("z", 1)))
+    left = TypeDesc(
+        "record", fields=(("a", TypeDesc("scalar", dtype="int64")),), metadata=(("z", 1), ("a", 2))
+    )
+    right = TypeDesc(
+        "record", fields=(("a", TypeDesc("scalar", dtype="int64")),), metadata=(("a", 2), ("z", 1))
+    )
     assert left == right
     assert left.fingerprint() == right.fingerprint()
-    assert TypeDesc("record", fields=(("b", TypeDesc("scalar")),
-                                      ("a", TypeDesc("scalar")))) != TypeDesc(
-                                          "record", fields=(("a", TypeDesc("scalar")),
-                                                            ("b", TypeDesc("scalar"))))
+    assert TypeDesc(
+        "record", fields=(("b", TypeDesc("scalar")), ("a", TypeDesc("scalar")))
+    ) != TypeDesc("record", fields=(("a", TypeDesc("scalar")), ("b", TypeDesc("scalar"))))
 
 
 def test_validation_rejects_bad_sizes_labels_duplicates_cycles_and_payloads() -> None:
@@ -79,11 +90,24 @@ def test_validation_rejects_bad_sizes_labels_duplicates_cycles_and_payloads() ->
         TypeDesc("scalar", shape=(1,))
     with pytest.raises(TypeDescValidationError):
         TypeDesc("opaque", metadata=(("bad", {"unhashable"}),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("scalar", fields=(("value", TypeDesc("scalar")),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", dtype="float64")
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("record", dtype="float64")
+
+
+def test_validation_rejects_cyclic_metadata() -> None:
+    cyclic: list[object] = []
+    cyclic.append(cyclic)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", metadata=(("cycle", cyclic),))
 
 
 def test_bind_is_complete_and_rejects_unknown_or_conflicting_bindings() -> None:
     descriptor = TypeDesc(
-        "record",
+        "example.record",
         dims=(("x", Symbol("N"), (Symbol("label"),)),),
         shape=(Symbol("N"),),
         index=(("row", Symbol("N"), None),),
