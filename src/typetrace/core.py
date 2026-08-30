@@ -159,7 +159,11 @@ def _canonical(value: Any) -> Any:
         return ("ellipsis",)
     if isinstance(value, type):
         return ("type", value.__module__, value.__qualname__)
-    raise TypeDescValidationError(f"unsupported canonical value: {type(value)!r}")
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise TypeDescValidationError(f"unsupported canonical value: {type(value)!r}") from exc
+    return ("hashable", type(value).__module__, type(value).__qualname__, repr(value))
 
 
 _SHAPE_CONTRACT_KINDS = frozenset(
@@ -518,13 +522,13 @@ class TypeDesc:
             visit(getattr(self, field))
         return found
 
-    def known_columns(self) -> list[str] | None:
-        """Return concrete known columns, excluding optional trailing ellipsis marker."""
+    def known_columns(self) -> list[Hashable] | None:
+        """Return known columns, excluding the optional trailing ellipsis marker."""
         if self.columns is None:
             return None
         if self.columns and self.columns[-1] is ...:
-            return [col for col in self.columns[:-1] if isinstance(col, str)]
-        return [col for col in self.columns if isinstance(col, str)]
+            return list(self.columns[:-1])
+        return list(self.columns)
 
     def with_dims(self, dims: Dims) -> "TypeDesc":
         """Return copy with updated dims."""

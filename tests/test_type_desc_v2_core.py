@@ -160,7 +160,7 @@ def test_validation_and_identity_edges() -> None:
     ):
         assert descriptor.bind({}) == descriptor
     assert TypeDesc("pandas.DataFrame", columns=("a", ...)).known_columns() == ["a"]
-    assert TypeDesc("pandas.DataFrame", columns=(1, ...)).known_columns() == []
+    assert TypeDesc("pandas.DataFrame", columns=(1, ...)).known_columns() == [1]
     with pytest.raises(TypeDescValidationError):
         TypeDesc("")
     with pytest.raises(TypeDescValidationError):
@@ -190,7 +190,7 @@ def test_validation_and_identity_edges() -> None:
     with pytest.raises(TypeDescValidationError):
         TypeDesc("opaque", metadata=((1, 2),))
     with pytest.raises(TypeDescValidationError):
-        TypeDesc("opaque", metadata=(("x", object()),))
+        TypeDesc("opaque", metadata=(("x", {"unhashable"}),))
     with pytest.raises(TypeDescValidationError):
         TypeDesc("record", fields=(([], TypeDesc("scalar")),))
     assert TypeDesc("record", fields=(("x", TypeDesc("scalar")),)).field("x").kind == "scalar"
@@ -238,3 +238,17 @@ def test_canonical_and_binding_edge_paths() -> None:
         TypeDesc("opaque", metadata=1)
     with pytest.raises(TypeDescValidationError):
         TypeDesc("opaque", metadata=[1])
+
+
+def test_arbitrary_hashable_labels_are_structural() -> None:
+    class Label:
+        def __repr__(self) -> str:
+            return "Label()"
+
+        def __hash__(self) -> int:
+            return 1
+
+    label = Label()
+    descriptor = TypeDesc("pandas.DataFrame", columns=(label,), dtypes=((label, "float64"),))
+    assert descriptor.known_columns() == [label]
+    assert descriptor.fingerprint() == descriptor.fingerprint()
