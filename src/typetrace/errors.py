@@ -1,6 +1,13 @@
 """Stable exception taxonomy for TypeDesc v2 boundaries."""
 
 from typetrace.core import (
+    AdapterAmbiguityError,
+    AdapterRegistrationError,
+    AdapterUnavailableError,
+    OperationBindingError,
+    OperationExecutionError,
+    ResultInferenceError,
+    SampleMaterializationError,
     TypeDescConflictError,
     TypeDescError,
     TypeDescUnknownError,
@@ -14,4 +21,11 @@ __all__ = [
     "TypeDescConflictError",
     "TypeDescUnknownError",
     "UnsupportedOperationError",
+    "AdapterRegistrationError",
+    "AdapterUnavailableError",
+    "AdapterAmbiguityError",
+    "SampleMaterializationError",
+    "OperationBindingError",
+    "OperationExecutionError",
+    "ResultInferenceError",
 ]

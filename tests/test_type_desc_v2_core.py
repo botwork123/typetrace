@@ -5,11 +5,37 @@ from dataclasses import FrozenInstanceError, fields
 import pytest
 
 from typetrace.core import (
+    AdapterAmbiguityError,
+    AdapterRegistrationError,
+    AdapterUnavailableError,
+    OperationBindingError,
+    OperationExecutionError,
+    ResultInferenceError,
+    SampleMaterializationError,
     Symbol,
     TypeDesc,
     TypeDescConflictError,
     TypeDescValidationError,
 )
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        AdapterRegistrationError,
+        AdapterUnavailableError,
+        AdapterAmbiguityError,
+        SampleMaterializationError,
+        OperationBindingError,
+        OperationExecutionError,
+        ResultInferenceError,
+    ],
+)
+def test_public_boundary_errors_carry_operation_and_path(error_type: type[Exception]) -> None:
+    error = error_type("bad", operation="sample", path=("args", 0))
+    assert error.operation == "sample"
+    assert error.path == ("args", 0)
+    assert "at args.0" in str(error)
 
 
 def test_constructor_has_exact_frozen_schema() -> None:

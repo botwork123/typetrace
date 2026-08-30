@@ -64,6 +64,7 @@ class TestForType:
             (type("DataFrame", (), {"__module__": "polars"}), "polars.DataFrame"),
             (type("Series", (), {"__module__": "polars"}), "polars.Series"),
             (type("Table", (), {"__module__": "pyarrow"}), "pyarrow.Table"),
+            (type("Array", (), {"__module__": "pyarrow"}), "pyarrow.Array"),
             (type("FloatArray", (), {"__module__": "drjit"}), "drjit.Array"),
         ],
     )

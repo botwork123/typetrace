@@ -78,6 +78,34 @@ class UnsupportedOperationError(TypeDescError):
     """A structural operation is not registered for a nominal kind."""
 
 
+class AdapterRegistrationError(TypeDescError):
+    """An adapter registration is invalid or collides with an existing adapter."""
+
+
+class AdapterUnavailableError(TypeDescError):
+    """A requested adapter backend is not installed or available."""
+
+
+class AdapterAmbiguityError(TypeDescError):
+    """More than one adapter matches a value or nominal type."""
+
+
+class SampleMaterializationError(TypeDescError):
+    """A TypeDesc could not be materialized into an execution sample."""
+
+
+class OperationBindingError(TypeDescError):
+    """Operation arguments could not be bound to a callable contract."""
+
+
+class OperationExecutionError(TypeDescError):
+    """Execution of a structural inference operation failed."""
+
+
+class ResultInferenceError(TypeDescError):
+    """An executed result could not be converted into a TypeDesc."""
+
+
 def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
     """Convert metadata containers to deterministic immutable tuples."""
     seen = _seen if _seen is not None else set()
@@ -471,7 +499,14 @@ class TypeDesc:
         return isinstance(other, TypeDesc) and _canonical(self) == _canonical(other)
 
     def fingerprint(self) -> str:
-        """Return a deterministic identity for this structural descriptor."""
+        """Return a structural identity.
+
+        Built-in scalar/container values have deterministic fingerprints. An
+        arbitrary user-defined hashable label has no portable encoding, so it
+        is intentionally identity-scoped to the Python process and descriptor
+        lifetime; this preserves the stronger invariant that unequal labels
+        cannot collapse in equality, hashing, or fingerprints.
+        """
         payload = repr(_canonical(self)).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
@@ -761,8 +796,11 @@ class TypeDesc:
                 return "polars.Series"
 
         # pyarrow
-        if module_root == "pyarrow" and concrete_type.__name__ == "Table":
-            return "pyarrow.Table"
+        if module_root == "pyarrow":
+            if concrete_type.__name__ == "Array":
+                return "pyarrow.Array"
+            if concrete_type.__name__ == "Table":
+                return "pyarrow.Table"
 
         # drjit - any type from drjit module
         if module_root == "drjit":

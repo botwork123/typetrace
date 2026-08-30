@@ -10,6 +10,13 @@ Core concepts:
 from typetrace.concrete import concrete_transform
 from typetrace.core import Dims, Symbol, TypeDesc, requires_shape_contract
 from typetrace.errors import (
+    AdapterAmbiguityError,
+    AdapterRegistrationError,
+    AdapterUnavailableError,
+    OperationBindingError,
+    OperationExecutionError,
+    ResultInferenceError,
+    SampleMaterializationError,
     TypeDescConflictError,
     TypeDescError,
     TypeDescUnknownError,
@@ -53,6 +60,13 @@ __all__ = [
     "TypeDescConflictError",
     "TypeDescUnknownError",
     "UnsupportedOperationError",
+    "AdapterRegistrationError",
+    "AdapterUnavailableError",
+    "AdapterAmbiguityError",
+    "SampleMaterializationError",
+    "OperationBindingError",
+    "OperationExecutionError",
+    "ResultInferenceError",
 ]
 
 __version__ = "0.1.3"
