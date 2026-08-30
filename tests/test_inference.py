@@ -21,11 +21,11 @@ class TestTypeContext:
     def test_construction_with_values(self) -> None:
         """TypeContext can be created with initial values."""
         bindings = {"N": 100, "T": 50}
-        sources = {"data": TypeDesc(kind="ndarray", dims={"x": 10})}
+        sources = {"data": TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))}
         ctx = TypeContext(bindings=bindings, sources=sources)
 
         assert ctx.bindings == {"N": 100, "T": 50}
-        assert ctx.sources == {"data": TypeDesc(kind="ndarray", dims={"x": 10})}
+        assert ctx.sources == {"data": TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))}
 
     def test_bind_returns_new_context(self) -> None:
         """bind() returns new context with additional binding."""
@@ -38,7 +38,7 @@ class TestTypeContext:
 
     def test_bind_preserves_sources(self) -> None:
         """bind() preserves sources from original context."""
-        source = TypeDesc(kind="ndarray", dims={"x": 10})
+        source = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))
         ctx = TypeContext(sources={"data": source})
         new_ctx = ctx.bind("N", 100)
 
@@ -46,8 +46,8 @@ class TestTypeContext:
 
     def test_with_source_returns_new_context(self) -> None:
         """with_source() returns new context with additional source."""
-        ctx = TypeContext(sources={"a": TypeDesc(kind="ndarray", dims={"x": 10})})
-        new_type = TypeDesc(kind="ndarray", dims={"y": 20})
+        ctx = TypeContext(sources={"a": TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))})
+        new_type = TypeDesc(kind="numpy.ndarray", dims=(("y", 20, None),))
         new_ctx = ctx.with_source("b", new_type)
 
         assert "a" in ctx.sources
@@ -59,23 +59,27 @@ class TestTypeContext:
     def test_with_source_preserves_bindings(self) -> None:
         """with_source() preserves bindings from original context."""
         ctx = TypeContext(bindings={"N": 100})
-        new_ctx = ctx.with_source("data", TypeDesc(kind="ndarray", dims={"x": 10}))
+        new_ctx = ctx.with_source("data", TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),)))
 
         assert new_ctx.bindings == {"N": 100}
 
     @pytest.mark.parametrize(
         "dims,bindings,expected_dims",
         [
-            ({"x": Symbol("N")}, {"N": 100}, {"x": 100}),
-            ({"x": Symbol("N"), "y": 50}, {"N": 100}, {"x": 100, "y": 50}),
-            ({"x": Symbol("N")}, {"T": 50}, {"x": Symbol("N")}),
-            ({"x": 10, "y": 20}, {"N": 100}, {"x": 10, "y": 20}),
+            ((("x", Symbol("N"), None),), {"N": 100}, (("x", 100, None),)),
+            (
+                (("x", Symbol("N"), None), ("y", 50, None)),
+                {"N": 100},
+                (("x", 100, None), ("y", 50, None)),
+            ),
+            ((("x", Symbol("N"), None),), {"T": 50}, (("x", Symbol("N"), None),)),
+            ((("x", 10, None), ("y", 20, None)), {"N": 100}, (("x", 10, None), ("y", 20, None))),
         ],
     )
-    def test_resolve_dims(self, dims: dict, bindings: dict, expected_dims: dict) -> None:
+    def test_resolve_dims(self, dims: tuple, bindings: dict, expected_dims: tuple) -> None:
         """resolve_dims() replaces Symbols with bound values."""
         ctx = TypeContext(bindings=bindings)
-        t = TypeDesc(kind="ndarray", dims=dims, dtype="float64")
+        t = TypeDesc(kind="numpy.ndarray", dims=dims, dtype="float64")
         result = ctx.resolve_dims(t)
 
         assert result.dims == expected_dims
@@ -84,7 +88,7 @@ class TestTypeContext:
     def test_resolve_dims_with_none(self) -> None:
         """resolve_dims() returns unchanged TypeDesc when dims is None."""
         ctx = TypeContext(bindings={"N": 100})
-        t = TypeDesc(kind="series", dtype="float64")
+        t = TypeDesc(kind="pandas.Series", dtype="float64")
         result = ctx.resolve_dims(t)
 
         assert result == t
@@ -106,7 +110,7 @@ class TestInferTypes:
             def type_transform(self) -> TypeDesc:
                 return self.output_type
 
-        expected = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        expected = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
         node = SimpleNode(output_type=expected)
         ctx = TypeContext()
 
@@ -135,17 +139,20 @@ class TestInferTypes:
 
             def type_transform(self, input_type: TypeDesc) -> TypeDesc:
                 # Double the x dimension
-                new_dims = dict(input_type.dims) if input_type.dims else {}
-                if "x" in new_dims:
-                    new_dims["x"] = new_dims["x"] * 2  # type: ignore
+                new_dims = tuple(
+                    (name, size * 2 if name == "x" and isinstance(size, int) else size, labels)
+                    for name, size, labels in (input_type.dims or ())
+                )
                 return input_type.with_dims(new_dims)
 
-        source = SourceNode(output_type=TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64"))
+        source = SourceNode(
+            output_type=TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
+        )
         transform = TransformNode(source=source)
         ctx = TypeContext()
 
         result = infer_types(transform, ctx)
-        assert result.dims == {"x": 20}
+        assert result.dims == (("x", 20, None),)
         assert result.dtype == "float64"
 
     def test_infer_caches_results(self) -> None:
@@ -160,7 +167,7 @@ class TestInferTypes:
             def type_transform(self) -> TypeDesc:
                 nonlocal call_count
                 call_count += 1
-                return TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+                return TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
 
         node = CountingNode()
         ctx = TypeContext()
@@ -185,11 +192,11 @@ class TestInferTypes:
             def type_transform(self, *inputs: TypeDesc) -> TypeDesc:
                 return self.output
 
-        node = NodeWithDeps(deps=[], output=TypeDesc(kind="ndarray", dims={"x": 5}))
+        node = NodeWithDeps(deps=[], output=TypeDesc(kind="numpy.ndarray", dims=(("x", 5, None),)))
         ctx = TypeContext()
 
         result = infer_types(node, ctx, get_upstream=lambda n: tuple(n.deps))
-        assert result.dims == {"x": 5}
+        assert result.dims == (("x", 5, None),)
 
     def test_infer_with_custom_get_transform(self) -> None:
         """infer_types works with custom get_transform function."""
@@ -201,14 +208,14 @@ class TestInferTypes:
 
         class Transformer:
             def type_transform(self) -> TypeDesc:
-                return TypeDesc(kind="ndarray", dims={"y": 15}, dtype="float32")
+                return TypeDesc(kind="numpy.ndarray", dims=(("y", 15, None),), dtype="float32")
 
         node = OpaqueNode()
         ctx = TypeContext()
         transformer = Transformer()
 
         result = infer_types(node, ctx, get_transform=lambda _: transformer)
-        assert result.dims == {"y": 15}
+        assert result.dims == (("y", 15, None),)
         assert result.dtype == "float32"
 
     def test_infer_resolves_symbols(self) -> None:
@@ -221,8 +228,11 @@ class TestInferTypes:
 
             def type_transform(self) -> TypeDesc:
                 return TypeDesc(
-                    kind="ndarray",
-                    dims={"x": Symbol("N"), "y": 10},
+                    kind="numpy.ndarray",
+                    dims=(
+                        ("x", Symbol("N"), None),
+                        ("y", 10, None),
+                    ),
                     dtype="float64",
                 )
 
@@ -230,7 +240,7 @@ class TestInferTypes:
         ctx = TypeContext(bindings={"N": 100})
 
         result = infer_types(node, ctx)
-        assert result.dims == {"x": 100, "y": 10}
+        assert result.dims == (("x", 100, None), ("y", 10, None))
 
     def test_infer_with_upstream_nodes_attr(self) -> None:
         """infer_types handles nodes with upstream_nodes() method."""
@@ -245,7 +255,7 @@ class TestInferTypes:
             def type_transform(self) -> TypeDesc:
                 return self.output_type
 
-        expected = TypeDesc(kind="ndarray", dims={"x": 30}, dtype="float64")
+        expected = TypeDesc(kind="numpy.ndarray", dims=(("x", 30, None),), dtype="float64")
         node = AltNode(output_type=expected)
         ctx = TypeContext()
 
@@ -257,11 +267,11 @@ class TestInferTypes:
 
         class LeafNode:
             def type_transform(self) -> TypeDesc:
-                return TypeDesc(kind="ndarray", dims={"z": 9}, dtype="float64")
+                return TypeDesc(kind="numpy.ndarray", dims=(("z", 9, None),), dtype="float64")
 
         result = infer_types(LeafNode(), TypeContext())
 
-        assert result == TypeDesc(kind="ndarray", dims={"z": 9}, dtype="float64")
+        assert result == TypeDesc(kind="numpy.ndarray", dims=(("z", 9, None),), dtype="float64")
 
     @pytest.mark.parametrize("cycle_kind", ["self", "two_node"])
     def test_infer_detects_cycles(self, cycle_kind: str) -> None:
@@ -275,7 +285,7 @@ class TestInferTypes:
                 return tuple(self.deps)
 
             def type_transform(self, *inputs: TypeDesc) -> TypeDesc:
-                return TypeDesc(kind="ndarray", dims={"x": 1}, dtype="float64")
+                return TypeDesc(kind="numpy.ndarray", dims=(("x", 1, None),), dtype="float64")
 
         if cycle_kind == "self":
             node = CyclicNode(deps=[])
@@ -318,14 +328,21 @@ class TestInferByExecution:
         def double_values(arr: xr.DataArray) -> xr.DataArray:
             return arr * 2
 
-        input_type = TypeDesc(kind="ndarray", dims={"x": 10, "y": 20}, dtype="float64")
+        input_type = TypeDesc(
+            kind="numpy.ndarray",
+            dims=(
+                ("x", 10, None),
+                ("y", 20, None),
+            ),
+            dtype="float64",
+        )
         result = infer_by_execution(double_values, input_type)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
         # Dims should be present (sizes may be 0 from sample)
-        assert "x" in result.dims
-        assert "y" in result.dims
+        assert {name for name, _, _ in result.dims} == {"dim0", "dim1"}
+        assert "dim1" in {name for name, _, _ in result.dims}
 
     def test_infer_by_execution_with_kwargs(self, xarray_available: bool) -> None:
         """infer_by_execution passes kwargs to function."""
@@ -337,10 +354,10 @@ class TestInferByExecution:
         def scale_values(arr: xr.DataArray, factor: float = 1.0) -> xr.DataArray:
             return arr * factor
 
-        input_type = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        input_type = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
         result = infer_by_execution(scale_values, input_type, factor=2.0)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
 
     def test_infer_by_execution_pandas(self, pandas_available: bool) -> None:
@@ -356,13 +373,19 @@ class TestInferByExecution:
             return df
 
         input_type = TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         )
         result = infer_by_execution(add_column, input_type)
 
-        assert result.kind == "dataframe"
+        assert result.kind == "pandas.DataFrame"
         assert "new_col" in result.columns
 
     def test_infer_by_execution_partial_schema_known_column_op_succeeds(
@@ -378,14 +401,17 @@ class TestInferByExecution:
             return df[["a"]]
 
         input_type = TypeDesc(
-            kind="dataframe",
-            columns=["a", ...],
-            dtypes={"a": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                ...,
+            ),
+            dtypes=(("a", "int64"),),
         )
         result = infer_by_execution(select_known, input_type, operation_name="select_known")
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a"]
+        assert result.kind == "pandas.DataFrame"
+        assert result.columns == ("a",)
 
     def test_infer_by_execution_partial_schema_unknown_column_op_fails_with_context(
         self, pandas_available: bool
@@ -400,9 +426,12 @@ class TestInferByExecution:
             return df[["b"]]
 
         input_type = TypeDesc(
-            kind="dataframe",
-            columns=["a", ...],
-            dtypes={"a": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                ...,
+            ),
+            dtypes=(("a", "int64"),),
         )
 
         with pytest.raises(
@@ -427,9 +456,12 @@ class TestInferByExecution:
             return df
 
         input_type = TypeDesc(
-            kind="dataframe",
-            columns=["a", ...],
-            dtypes={"a": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                ...,
+            ),
+            dtypes=(("a", "int64"),),
         )
 
         with pytest.raises(
@@ -456,9 +488,9 @@ class TestInferByExecution:
             return df
 
         input_type = TypeDesc(
-            kind="dataframe",
-            columns=["a"],
-            dtypes={"a": "int64"},
+            kind="pandas.DataFrame",
+            columns=("a",),
+            dtypes=(("a", "int64"),),
         )
         result = infer_by_execution(
             identity,
@@ -467,5 +499,5 @@ class TestInferByExecution:
             operation_name="select_all",
         )
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a"]
+        assert result.kind == "pandas.DataFrame"
+        assert result.columns == ("a",)

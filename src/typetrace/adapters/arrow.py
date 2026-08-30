@@ -24,9 +24,9 @@ def from_arrow(value: Any) -> TypeDesc:
     if isinstance(value, pa.Table):
         columns = value.column_names
         dtypes = {name: str(value.schema.field(name).type) for name in columns}
-        return TypeDesc(kind="columnar", columns=columns, dtypes=dtypes)
+        return TypeDesc(kind="pyarrow.Table", columns=tuple(columns), dtypes=tuple(dtypes.items()))
     if isinstance(value, pa.Array):
-        return TypeDesc(kind="series", dtype=str(value.type))
+        return TypeDesc(kind="pyarrow.Array", dtype=str(value.type))
     raise TypeError(f"Expected Arrow type, got {type(value)}")
 
 
@@ -60,7 +60,7 @@ def make_arrow_table_sample(type_desc: TypeDesc) -> Any:
     Create minimal Arrow Table from TypeDesc.
 
     Args:
-        type_desc: TypeDesc with kind='columnar'
+        type_desc: TypeDesc with kind='pyarrow.Table'
 
     Returns:
         pyarrow.Table with correct schema
@@ -71,7 +71,7 @@ def make_arrow_table_sample(type_desc: TypeDesc) -> Any:
     if known_columns is None:
         raise ValueError("Cannot make Arrow Table sample without columns")
 
-    dtypes = type_desc.dtypes or {}
+    dtypes = dict(type_desc.dtypes or ())
     fields = []
     arrays = []
 
@@ -90,7 +90,7 @@ def make_arrow_array_sample(type_desc: TypeDesc) -> Any:
     Create minimal Arrow Array from TypeDesc.
 
     Args:
-        type_desc: TypeDesc with kind='series'
+        type_desc: TypeDesc with kind='pyarrow.Array'
 
     Returns:
         pyarrow.Array with correct type

@@ -15,8 +15,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from types import EllipsisType
-from typing import Any, Callable, Hashable, Literal
+from typing import Any, Callable, Hashable, cast
 
 from typetrace.runtime_utils import module_root
 
@@ -79,41 +78,6 @@ class UnsupportedOperationError(TypeDescError):
     """A structural operation is not registered for a nominal kind."""
 
 
-class _FrozenDict(dict[Any, Any]):
-    """Hashable mapping retaining the normal dict comparison/access API."""
-
-    def __hash__(self) -> int:
-        return hash(tuple(sorted(self.items(), key=lambda item: repr(item[0]))))
-
-    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
-        raise TypeError("TypeDesc mappings are immutable")
-
-    __delitem__ = __setitem__ = clear = pop = popitem = setdefault = update = _immutable
-
-
-class _FrozenList(list[Any]):
-    """Hashable list retaining list equality for compatibility."""
-
-    def __hash__(self) -> int:
-        return hash(tuple(self))
-
-    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
-        raise TypeError("TypeDesc sequences are immutable")
-
-    __delitem__ = __setitem__ = __iadd__ = __imul__ = append = extend = insert = _immutable
-    pop = remove = reverse = sort = clear = _immutable
-
-
-def _freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return _FrozenDict({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return _FrozenList(_freeze(item) for item in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze(item) for item in value)
-    return value
-
-
 def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
     """Convert metadata containers to deterministic immutable tuples."""
     seen = _seen if _seen is not None else set()
@@ -124,7 +88,10 @@ def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
         seen.add(object_id)
         try:
             items = tuple(
-                sorted((key, _freeze_metadata(item, seen)) for key, item in value.items())
+                sorted(
+                    ((key, _freeze_metadata(item, seen)) for key, item in value.items()),
+                    key=repr,
+                )
             )
         finally:
             seen.remove(object_id)
@@ -143,7 +110,7 @@ def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
         hash(value)
     except TypeError as exc:
         raise TypeDescValidationError("metadata contains an unhashable value") from exc
-    return value
+    return cast(Hashable, value)
 
 
 def _canonical(value: Any) -> Any:
@@ -184,12 +151,16 @@ def _canonical(value: Any) -> Any:
 
 _SHAPE_CONTRACT_KINDS = frozenset(
     {
-        "ndarray",
-        "dataset",
-        "dataframe",
-        "series",
-        "columnar",
-        "drjit",
+        "numpy.ndarray",
+        "xarray.DataArray",
+        "xarray.Dataset",
+        "pandas.DataFrame",
+        "pandas.Series",
+        "polars.DataFrame",
+        "polars.Series",
+        "pyarrow.Array",
+        "pyarrow.Table",
+        "drjit.Array",
     }
 )
 
@@ -204,13 +175,8 @@ class TypeDesc:
     """
     Universal type descriptor for heterogeneous data structures.
 
-    Supports:
-    - ndarray: xarray DataArray, numpy ndarray (named dims)
-    - dataframe: pandas/polars DataFrame (index + columns)
-    - series: pandas Series (index + single dtype)
-    - columnar: Arrow tables (schema)
-    - class: opaque custom classes (fields)
-    - drjit: DrJit arrays/tensors (positional shape)
+    Supports nominal backend/container kinds while keeping their structural
+    payloads in one hash-stable schema.
 
     Attributes:
         kind: The category of data structure
@@ -280,7 +246,10 @@ class TypeDesc:
         if self.dtype is not None and not isinstance(self.dtype, str):
             raise TypeDescValidationError("dtype must be a string or None")
         if self.static_dims is not None:
-            if any(not isinstance(size, int) or size < 0 for size in self.static_dims):
+            if any(
+                not isinstance(size, int) or isinstance(size, bool) or size < 0
+                for size in self.static_dims
+            ):
                 raise TypeDescValidationError("static_dims must contain non-negative integers")
             object.__setattr__(self, "static_dims", tuple(self.static_dims))
         if self.drjit_type is not None and not isinstance(self.drjit_type, type):
@@ -325,7 +294,7 @@ class TypeDesc:
         for index, size in enumerate(value):
             if isinstance(size, Symbol):
                 result.append(size)
-            elif isinstance(size, int) and size >= 0:
+            elif isinstance(size, int) and not isinstance(size, bool) and size >= 0:
                 result.append(size)
             else:
                 raise TypeDescValidationError(
@@ -337,10 +306,10 @@ class TypeDesc:
     def _normalize_dims(cls, value: Any, path: str) -> Dims | None:
         if value is None:
             return None
-        if isinstance(value, Mapping):
-            entries = tuple((name, size, None) for name, size in value.items())
-        else:
+        try:
             entries = tuple(tuple(entry) for entry in value)
+        except TypeError as exc:
+            raise TypeDescValidationError(f"{path} must be a sequence") from exc
         result: list[tuple[str, DimValue, tuple[Hashable, ...] | None]] = []
         names: set[str] = set()
         for index, entry in enumerate(entries):
@@ -367,7 +336,9 @@ class TypeDesc:
 
     @staticmethod
     def _validate_size(size: Any, path: str) -> None:
-        if not isinstance(size, Symbol) and (not isinstance(size, int) or size < 0):
+        if not isinstance(size, Symbol) and (
+            not isinstance(size, int) or isinstance(size, bool) or size < 0
+        ):
             raise TypeDescValidationError(f"{path} size must be non-negative or Symbol")
 
     @staticmethod
@@ -382,7 +353,7 @@ class TypeDesc:
                 hash(item)
         except TypeError as exc:
             raise TypeDescValidationError(f"{path} contains an unhashable value") from exc
-        if ... in result and result[-1] is not ...:
+        if ... in result and (result[-1] is not ... or result.count(...) != 1):
             raise TypeDescValidationError(f"{path} ellipsis must be trailing")
         return result
 
@@ -437,6 +408,8 @@ class TypeDesc:
                 raise TypeDescValidationError(f"metadata[{index}] must be (str, hashable)")
             key, raw = pair
             frozen = _freeze_metadata(raw)
+            if key in result:
+                raise TypeDescValidationError(f"metadata contains duplicate key {key!r}")
             result[key] = frozen
         return tuple(sorted(result.items()))
 
@@ -527,7 +500,7 @@ class TypeDesc:
 
         Handles:
         - Python scalars (int, float, str, bool) → TypeDesc(kind="scalar", dtype=...)
-        - numpy arrays → TypeDesc(kind="ndarray", dtype=..., dims={...})
+        - numpy arrays → TypeDesc(kind="numpy.ndarray", dtype=..., dims=...)
         - numpy scalars → TypeDesc(kind="scalar", dtype=...)
         - xarray/pandas/polars/arrow/drjit → dispatched to adapters
         - Other objects → introspected as class
@@ -542,7 +515,7 @@ class TypeDesc:
         if isinstance(value, str):
             return cls(kind="scalar", dtype="str")
         if isinstance(value, (bytes, type(None))):
-            return cls(kind="class", fields=None)
+            return cls(kind="opaque", metadata=(("value", None),))
 
         root = module_root(value)
         dispatch = cls._dispatch_table()
@@ -584,7 +557,7 @@ class TypeDesc:
             return cls(kind="recursive")
         _seen.add(obj_id)
 
-        fields: dict[str, TypeDesc] = {}
+        fields: list[tuple[str, TypeDesc]] = []
         for name in dir(value):
             if name.startswith("_"):
                 continue
@@ -594,8 +567,8 @@ class TypeDesc:
                 continue
             if callable(attr):
                 continue
-            fields[name] = cls.from_value(attr, _seen=_seen)
-        return cls(kind="class", fields=fields or None)
+            fields.append((name, cls.from_value(attr, _seen=_seen)))
+        return cls(kind="record", fields=tuple(fields))
 
     def make_sample(self) -> Any:
         """Create minimal runtime sample preserving this descriptor schema."""
@@ -607,18 +580,27 @@ class TypeDesc:
     @staticmethod
     def _sample_dispatch_table() -> dict[str, Callable[["TypeDesc"], Any]]:
         """Build sample-materialization dispatch table lazily."""
-        from typetrace.adapters.arrow import make_arrow_table_sample
+        from typetrace.adapters.arrow import make_arrow_array_sample, make_arrow_table_sample
         from typetrace.adapters.drjit import make_drjit_sample
+        from typetrace.adapters.numpy import make_numpy_sample
         from typetrace.adapters.pandas import make_dataframe_sample, make_series_sample
+        from typetrace.adapters.polars import (
+            make_polars_dataframe_sample,
+            make_polars_series_sample,
+        )
         from typetrace.adapters.xarray import make_dataset_sample, make_xarray_sample
 
         return {
-            "ndarray": make_xarray_sample,
-            "dataset": make_dataset_sample,
-            "dataframe": make_dataframe_sample,
-            "series": make_series_sample,
-            "columnar": make_arrow_table_sample,
-            "drjit": make_drjit_sample,
+            "numpy.ndarray": make_numpy_sample,
+            "xarray.DataArray": make_xarray_sample,
+            "xarray.Dataset": make_dataset_sample,
+            "pandas.DataFrame": make_dataframe_sample,
+            "pandas.Series": make_series_sample,
+            "polars.DataFrame": make_polars_dataframe_sample,
+            "polars.Series": make_polars_series_sample,
+            "pyarrow.Table": make_arrow_table_sample,
+            "pyarrow.Array": make_arrow_array_sample,
+            "drjit.Array": make_drjit_sample,
         }
 
     def field(self, name: str) -> "TypeDesc":
@@ -638,10 +620,10 @@ class TypeDesc:
         dtype: str | None = None,
         dims: Dims | None = None,
         shape: tuple[DimValue, ...] | None = None,
-        columns: list[str | EllipsisType] | None = None,
-        dtypes: dict[str, str] | None = None,
+        columns: tuple[Hashable, ...] | None = None,
+        dtypes: tuple[tuple[Hashable, str], ...] | None = None,
         index: Dims | None = None,
-        fields: dict[str, "TypeDesc"] | None = None,
+        fields: tuple[tuple[Hashable, "TypeDesc"], ...] | None = None,
         drjit_type: type | None = None,
         static_dims: tuple[int, ...] | None = None,
     ) -> "TypeDesc":
@@ -667,11 +649,11 @@ class TypeDesc:
             TypeDesc with kind inferred from concrete_type
 
         Examples:
-            >>> TypeDesc.for_type(xr.DataArray, dtype="float64", dims={"x": 10})
-            TypeDesc(kind='ndarray', dtype='float64', dims={'x': 10}, ...)
+            >>> TypeDesc.for_type(xr.DataArray, dtype="float64", dims=(("x", 10, None),))
+            TypeDesc(kind='xarray.DataArray', dtype='float64', ...)
 
-            >>> TypeDesc.for_type(pd.DataFrame, columns=["a", "b"])
-            TypeDesc(kind='dataframe', columns=['a', 'b'], ...)
+            >>> TypeDesc.for_type(pd.DataFrame, columns=("a", "b"))
+            TypeDesc(kind='pandas.DataFrame', columns=('a', 'b'), ...)
         """
         kind = cls._kind_for_type(concrete_type)
         return cls(
@@ -690,61 +672,50 @@ class TypeDesc:
     @staticmethod
     def _kind_for_type(
         concrete_type: type,
-    ) -> Literal[
-        "ndarray",
-        "dataset",
-        "dataframe",
-        "series",
-        "columnar",
-        "class",
-        "drjit",
-        "recursive",
-        "scalar",
-    ]:
+    ) -> str:
         """Map Python type to TypeDesc kind.
 
         Supports:
-        - xarray: DataArray, Dataset → "ndarray"
-        - numpy: ndarray → "ndarray"
-        - pandas: DataFrame → "dataframe", Series → "series"
-        - polars: DataFrame → "dataframe", Series → "series"
-        - pyarrow: Table → "columnar"
-        - drjit: any dr.* array type → "drjit"
+        - xarray: DataArray, Dataset → nominal xarray kind
+        - numpy: ndarray → ``numpy.ndarray``
+        - pandas/polars: DataFrame and Series → nominal backend kind
+        - pyarrow: Table → ``pyarrow.Table``
+        - drjit: any dr.* array type → ``drjit.Array``
         """
         module_root = concrete_type.__module__.split(".")[0]
 
         # xarray types
         if module_root == "xarray":
             if concrete_type.__name__ == "DataArray":
-                return "ndarray"
+                return "xarray.DataArray"
             if concrete_type.__name__ == "Dataset":
-                return "dataset"
+                return "xarray.Dataset"
 
         # numpy
         if module_root == "numpy" and concrete_type.__name__ == "ndarray":
-            return "ndarray"
+            return "numpy.ndarray"
 
         # pandas
         if module_root == "pandas":
             if concrete_type.__name__ == "DataFrame":
-                return "dataframe"
+                return "pandas.DataFrame"
             if concrete_type.__name__ == "Series":
-                return "series"
+                return "pandas.Series"
 
         # polars
         if module_root == "polars":
             if concrete_type.__name__ == "DataFrame":
-                return "dataframe"
+                return "polars.DataFrame"
             if concrete_type.__name__ == "Series":
-                return "series"
+                return "polars.Series"
 
         # pyarrow
         if module_root == "pyarrow" and concrete_type.__name__ == "Table":
-            return "columnar"
+            return "pyarrow.Table"
 
         # drjit - any type from drjit module
         if module_root == "drjit":
-            return "drjit"
+            return "drjit.Array"
 
-        # Fallback to class for unknown types
-        return "class"
+        # Fallback to the generic opaque noun for unknown types.
+        return "opaque"

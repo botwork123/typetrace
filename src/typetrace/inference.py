@@ -187,7 +187,7 @@ def infer_by_execution(
                 and len(type_desc.columns) > 0
                 and type_desc.columns[-1] is ...
             )
-            if type_desc.kind == "dataframe" and has_trailing_ellipsis:
+            if type_desc.kind in {"pandas.DataFrame", "polars.DataFrame"} and has_trailing_ellipsis:
                 raise ValueError(
                     f"infer_by_execution({operation}): input[{index}] has partial "
                     "dataframe schema (columns end with ...); operation "

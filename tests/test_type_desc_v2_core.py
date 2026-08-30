@@ -140,3 +140,95 @@ def test_symbol_names_are_validated() -> None:
         Symbol("")
     with pytest.raises(TypeDescValidationError):
         Symbol("not valid")
+
+
+def test_validation_and_identity_edges() -> None:
+    """Exercise the complete constructor boundary, including negative paths."""
+    assert TypeDesc(
+        "scalar", dtype="float64", metadata=(("none", None), ("bytes", b"x"))
+    ).fingerprint()
+    assert TypeDesc("numpy.ndarray", shape=[1, Symbol("N")]).shape == (1, Symbol("N"))
+    assert TypeDesc("numpy.ndarray", dims=(("x", 2),)).dims == (("x", 2, None),)
+    assert TypeDesc("opaque", metadata={"b": 2, "a": [1, 2]}).metadata == (
+        ("a", (1, 2)),
+        ("b", 2),
+    )
+    for descriptor in (
+        TypeDesc("numpy.ndarray"),
+        TypeDesc("pandas.DataFrame"),
+        TypeDesc("record", fields=(("x", TypeDesc("scalar")),)),
+    ):
+        assert descriptor.bind({}) == descriptor
+    assert TypeDesc("pandas.DataFrame", columns=("a", ...)).known_columns() == ["a"]
+    assert TypeDesc("pandas.DataFrame", columns=(1, ...)).known_columns() == []
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("")
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", shape="bad")
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=(("x", 1, ("a", "b")),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=(("x", True, None),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=(("x", 1, None), ("x", 1, None)))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", columns=("x",))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("pandas.DataFrame", dtypes=(("a", 1),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("pandas.DataFrame", dtypes=(([], "int64"),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("pandas.DataFrame", dtypes=(("a", "int64"), ("a", "float64")))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("record", fields=(("x", TypeDesc("scalar")), ("x", TypeDesc("scalar"))))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("scalar", dtype=1)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("drjit.Array", static_dims=(True,))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("drjit.Array", drjit_type=1)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", metadata=((1, 2),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("opaque", metadata=(("x", object()),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("record", fields=(([], TypeDesc("scalar")),))
+    assert TypeDesc("record", fields=(("x", TypeDesc("scalar")),)).field("x").kind == "scalar"
+    with pytest.raises(ValueError):
+        TypeDesc("scalar").field("x")
+    with pytest.raises(KeyError):
+        TypeDesc("record", fields=(("x", TypeDesc("scalar")),)).field("y")
+
+
+def test_canonical_and_binding_edge_paths() -> None:
+    from typetrace.core import _canonical
+
+    descriptor = TypeDesc(
+        "custom",
+        metadata=(
+            ("bool", True),
+            ("nan", float("nan")),
+            ("inf", float("inf")),
+            ("mapping", {"x": 1}),
+            ("type", int),
+        ),
+    )
+    assert _canonical(descriptor)
+    nested = TypeDesc("custom", metadata=(("nested", {"N": Symbol("N")}),))
+    assert nested.bind({"N": 3}).metadata == (("nested", (("N", 3),)),)
+    cyclic: dict[str, object] = {}
+    cyclic["self"] = cyclic
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("custom", metadata=(("cycle", cyclic),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=1)
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=(("x", 1, None, 2),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("numpy.ndarray", dims=(("x", 1, ([],)),))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("custom", dtypes=(("x", "a"), ("x", "b")))
+    with pytest.raises(TypeDescValidationError):
+        TypeDesc("custom", metadata=(("x", 1), ("x", 2)))
+    assert TypeDesc("custom", metadata=None).metadata == ()
+    assert TypeDesc("drjit.Array", static_dims=(1, 2)).static_dims == (1, 2)

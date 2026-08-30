@@ -27,7 +27,7 @@ def from_drjit(value: Any) -> TypeDesc:
     drjit_type = type(value)
 
     return TypeDesc(
-        kind="drjit",
+        kind="drjit.Array",
         shape=shape,
         dtype=dtype,
         drjit_type=drjit_type,
@@ -44,7 +44,7 @@ def make_drjit_sample(type_desc: TypeDesc) -> Any:
     Create minimal DrJit array from TypeDesc.
 
     Args:
-        type_desc: TypeDesc with kind='drjit'
+        type_desc: TypeDesc with kind='drjit.Array'
 
     Returns:
         DrJit array with correct type (size 0)

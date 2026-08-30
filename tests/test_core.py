@@ -68,13 +68,13 @@ class TestTypeDesc:
     @pytest.mark.parametrize(
         "kind,dims,dtype",
         [
-            ("ndarray", {"x": 10, "y": 20}, "float64"),
-            ("ndarray", {"symbol": Symbol("N")}, "float32"),
-            ("dataframe", None, None),
-            ("series", None, "int64"),
+            ("numpy.ndarray", (("x", 10, None), ("y", 20, None)), "float64"),
+            ("numpy.ndarray", (("symbol", Symbol("N"), None),), "float32"),
+            ("pandas.DataFrame", None, None),
+            ("pandas.Series", None, "int64"),
         ],
     )
-    def test_typedesc_creation(self, kind: str, dims: dict | None, dtype: str | None) -> None:
+    def test_typedesc_creation(self, kind: str, dims: tuple | None, dtype: str | None) -> None:
         """TypeDesc can be created with various configurations."""
         t = TypeDesc(kind=kind, dims=dims, dtype=dtype)
         assert t.kind == kind
@@ -83,80 +83,115 @@ class TestTypeDesc:
 
     def test_with_dims(self) -> None:
         """with_dims returns new TypeDesc with updated dims."""
-        original = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
-        updated = original.with_dims({"x": 20, "y": 30})
+        original = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
+        updated = original.with_dims((("x", 20, None), ("y", 30, None)))
 
-        assert original.dims == {"x": 10}  # Original unchanged
-        assert updated.dims == {"x": 20, "y": 30}
+        assert original.dims == (("x", 10, None),)  # Original unchanged
+        assert updated.dims == (("x", 20, None), ("y", 30, None))
         assert updated.dtype == "float64"  # Other fields preserved
 
     def test_with_dtype(self) -> None:
         """with_dtype returns new TypeDesc with updated dtype."""
-        original = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        original = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
         updated = original.with_dtype("float32")
 
         assert original.dtype == "float64"  # Original unchanged
         assert updated.dtype == "float32"
-        assert updated.dims == {"x": 10}  # Other fields preserved
+        assert updated.dims == (("x", 10, None),)  # Other fields preserved
 
     def test_field_access(self) -> None:
         """field() returns nested TypeDesc for classes."""
-        inner = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
-        outer = TypeDesc(kind="class", fields={"value": inner})
+        inner = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
+        outer = TypeDesc(kind="record", fields=(("value", inner),))
 
         assert outer.field("value") == inner
 
     def test_field_access_missing_fields(self) -> None:
         """field() raises ValueError when no fields."""
-        t = TypeDesc(kind="ndarray", dims={"x": 10})
+        t = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))
         with pytest.raises(ValueError, match="no fields"):
             t.field("value")
 
     def test_field_access_missing_key(self) -> None:
         """field() raises KeyError for missing field."""
-        inner = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
-        outer = TypeDesc(kind="class", fields={"value": inner})
+        inner = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
+        outer = TypeDesc(kind="record", fields=(("value", inner),))
 
         with pytest.raises(KeyError, match="missing"):
             outer.field("missing")
 
+    def test_typedesc_is_deeply_immutable_and_hashable(self) -> None:
+        dims = [("instrument", Symbol("N"), None)]
+        fields = {"price": TypeDesc(kind="numpy.ndarray", dims=(("instrument", 2, None),))}
+        columns = ["price", ...]
+        descriptor = TypeDesc(
+            kind="custom.record",
+            dims=dims,
+            fields=tuple(fields.items()),
+            columns=columns,
+            dtypes=(("price", "float64"),),
+            index=(("row", 2, None),),
+        )
+
+        dims.append(("other", 3, None))
+        fields["volume"] = TypeDesc(kind="scalar", dtype="float64")
+        columns.append("volume")
+
+        assert descriptor.dims == (("instrument", Symbol("N"), None),)
+        assert descriptor.columns == ("price", ...)
+        assert hash(descriptor) == hash(descriptor)
+        with pytest.raises(TypeError):
+            descriptor.dims[0] = ("x", 1, None)  # type: ignore[index]
+        with pytest.raises(TypeError):
+            descriptor.fields[0] = ("x", descriptor)  # type: ignore[index]
+        with pytest.raises(TypeError):
+            descriptor.columns[0] = "x"  # type: ignore[index]
+
+    def test_equal_typedescs_have_stable_fingerprint(self) -> None:
+        left = TypeDesc(kind="numpy.ndarray", dims=(("x", 2, None),), dtype="float64")
+        right = TypeDesc(kind="numpy.ndarray", dims=(("x", 2, None),), dtype="float64")
+
+        assert left == right
+        assert hash(left) == hash(right)
+        assert left.fingerprint() == right.fingerprint()
+
     def test_frozen(self) -> None:
         """TypeDesc is immutable."""
-        t = TypeDesc(kind="ndarray", dims={"x": 10})
+        t = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),))
         with pytest.raises(Exception):  # FrozenInstanceError
-            t.dims = {"y": 20}  # type: ignore
+            t.dims = (("y", 20, None),)  # type: ignore
 
     def test_dataframe_exact_schema_default(self) -> None:
         """Exact schema remains default without trailing ellipsis."""
-        t = TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "int64"})
-        assert t.columns == ["a"]
+        t = TypeDesc(kind="pandas.DataFrame", columns=("a",), dtypes=(("a", "int64"),))
+        assert t.columns == ("a",)
 
     @pytest.mark.parametrize(
         "columns,expected_known",
         [
-            (["a", ...], ["a"]),
-            ([...], []),
-            (["a"], ["a"]),
+            (("a", ...), ["a"]),
+            ((...,), []),
+            (("a",), ["a"]),
         ],
     )
     def test_dataframe_partial_schema_ellipsis_only(
-        self, columns: list, expected_known: list
+        self, columns: tuple, expected_known: list
     ) -> None:
         """Trailing ellipsis is the only partial-schema signal."""
-        t = TypeDesc(kind="dataframe", columns=columns, dtypes={"a": "int64"})
+        t = TypeDesc(kind="pandas.DataFrame", columns=columns, dtypes=(("a", "int64"),))
         assert t.known_columns() == expected_known
 
     @pytest.mark.parametrize(
         "columns",
         [
-            ["a", ..., "b"],
-            ["a", ..., ...],
+            ("a", ..., "b"),
+            ("a", ..., ...),
         ],
     )
-    def test_dataframe_partial_schema_ellipsis_must_be_trailing(self, columns: list) -> None:
+    def test_dataframe_partial_schema_ellipsis_must_be_trailing(self, columns: tuple) -> None:
         """Ellipsis marker must only appear as final columns entry."""
-        with pytest.raises(ValueError, match="trailing ellipsis"):
-            TypeDesc(kind="dataframe", columns=columns)
+        with pytest.raises(ValueError, match="ellipsis must be trailing"):
+            TypeDesc(kind="pandas.DataFrame", columns=columns)
 
 
 class TestTypeDescFromValue:
@@ -171,8 +206,8 @@ class TestTypeDescFromValue:
         da = xr.DataArray(np.zeros((5, 10)), dims=["x", "y"])
         result = TypeDesc.from_value(da)
 
-        assert result.kind == "ndarray"
-        assert result.dims == {"x": 5, "y": 10}
+        assert result.kind == "xarray.DataArray"
+        assert result.dims == (("x", 5, None), ("y", 10, None))
         assert result.dtype == "float64"
 
     @pandas_required
@@ -183,8 +218,8 @@ class TestTypeDescFromValue:
         df = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
         result = TypeDesc.from_value(df)
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a", "b"]
+        assert result.kind == "pandas.DataFrame"
+        assert result.columns == ("a", "b")
 
     @pandas_required
     def test_from_value_pandas_series(self) -> None:
@@ -194,7 +229,7 @@ class TestTypeDescFromValue:
         s = pd.Series([1.0, 2.0, 3.0])
         result = TypeDesc.from_value(s)
 
-        assert result.kind == "series"
+        assert result.kind == "pandas.Series"
         assert result.dtype == "float64"
 
     @polars_required
@@ -205,8 +240,8 @@ class TestTypeDescFromValue:
         df = pl.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
         result = TypeDesc.from_value(df)
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a", "b"]
+        assert result.kind == "polars.DataFrame"
+        assert result.columns == ("a", "b")
 
     @pyarrow_required
     def test_from_value_arrow_table(self) -> None:
@@ -216,8 +251,8 @@ class TestTypeDescFromValue:
         table = pa.table({"a": [1, 2], "b": [3.0, 4.0]})
         result = TypeDesc.from_value(table)
 
-        assert result.kind == "columnar"
-        assert result.columns == ["a", "b"]
+        assert result.kind == "pyarrow.Table"
+        assert result.columns == ("a", "b")
 
     @drjit_required
     def test_from_value_drjit_array(self) -> None:
@@ -227,7 +262,7 @@ class TestTypeDescFromValue:
         arr = llvm.Float64([1.0, 2.0, 3.0])
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "drjit"
+        assert result.kind == "drjit.Array"
         assert result.dtype == "float64"
 
     def test_from_value_opaque_object(self) -> None:
@@ -241,10 +276,9 @@ class TestTypeDescFromValue:
         obj = CustomClass()
         result = TypeDesc.from_value(obj)
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         assert result.fields is not None
-        assert "value" in result.fields
-        assert "name" in result.fields
+        assert {key for key, _ in result.fields} >= {"value", "name"}
 
     def test_from_value_opaque_object_no_public_attrs(self) -> None:
         """from_value handles objects with no public non-callable attrs."""
@@ -259,8 +293,8 @@ class TestTypeDescFromValue:
         obj = EmptyClass()
         result = TypeDesc.from_value(obj)
 
-        assert result.kind == "class"
-        assert result.fields is None
+        assert result.kind == "record"
+        assert result.fields == ()
 
     @pytest.mark.parametrize("error_cls", [AttributeError, RuntimeError, ValueError])
     def test_from_value_opaque_object_with_property_error_types(
@@ -278,9 +312,9 @@ class TestTypeDescFromValue:
 
         result = TypeDesc.from_value(ProblematicClass())
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         assert result.fields is not None
-        assert sorted(result.fields.keys()) == ["good_attr"]
+        assert [key for key, _ in result.fields] == ["good_attr"]
 
     def test_from_value_module_substring_does_not_misdispatch(self) -> None:
         """from_value does not dispatch adapters when module merely contains adapter name."""
@@ -293,10 +327,10 @@ class TestTypeDescFromValue:
 
         result = TypeDesc.from_value(FakeXarrayLike())
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         assert result.fields is not None
-        assert list(result.fields.keys()) == ["value"]
-        assert result.fields["value"] == TypeDesc(kind="scalar", dtype="int64")
+        assert [key for key, _ in result.fields] == ["value"]
+        assert result.field("value") == TypeDesc(kind="scalar", dtype="int64")
 
     def test_from_value_self_referencing_object(self) -> None:
         """from_value handles objects that reference themselves without infinite recursion."""
@@ -309,12 +343,12 @@ class TestTypeDescFromValue:
         obj = SelfRef()
         result = TypeDesc.from_value(obj)
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         assert result.fields is not None
-        assert "value" in result.fields
+        assert "value" in {key for key, _ in result.fields}
         # Self-reference should be detected and marked as recursive
-        assert "me" in result.fields
-        assert result.fields["me"].kind == "recursive"
+        assert "me" in {key for key, _ in result.fields}
+        assert result.field("me").kind == "recursive"
 
     def test_from_value_circular_reference(self) -> None:
         """from_value handles circular references between objects."""
@@ -332,15 +366,15 @@ class TestTypeDescFromValue:
 
         result = TypeDesc.from_value(a)
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         assert result.fields is not None
-        assert "other" in result.fields
+        assert "other" in {key for key, _ in result.fields}
         # B should be extracted, with its reference back to A marked as recursive
-        b_desc = result.fields["other"]
-        assert b_desc.kind == "class"
+        b_desc = result.field("other")
+        assert b_desc.kind == "record"
         assert b_desc.fields is not None
-        assert "other" in b_desc.fields
-        assert b_desc.fields["other"].kind == "recursive"
+        assert "other" in {key for key, _ in b_desc.fields}
+        assert b_desc.field("other").kind == "recursive"
 
     def test_from_value_deep_nesting_no_cycle(self) -> None:
         """from_value handles deep nesting without cycles (no false positive recursion)."""
@@ -354,15 +388,16 @@ class TestTypeDescFromValue:
         deep = Node(1, Node(2, Node(3, Node(4, Node(5)))))
         result = TypeDesc.from_value(deep)
 
-        assert result.kind == "class"
+        assert result.kind == "record"
         # Should traverse all levels without marking anything as recursive
         current = result
         for _ in range(5):
-            assert current.kind == "class"
+            assert current.kind == "record"
             assert current.fields is not None
-            assert "val" in current.fields
-            if current.fields.get("child") and current.fields["child"].fields:
-                current = current.fields["child"]
+            assert "val" in {key for key, _ in current.fields}
+            child = current.field("child")
+            if child.fields:
+                current = child
 
 
 class TestTypeDescMakeSample:
@@ -373,7 +408,14 @@ class TestTypeDescMakeSample:
         """make_sample creates xarray DataArray for ndarray kind."""
         import xarray as xr
 
-        t = TypeDesc(kind="ndarray", dims={"x": 10, "y": 20}, dtype="float32")
+        t = TypeDesc(
+            kind="xarray.DataArray",
+            dims=(
+                ("x", 10, None),
+                ("y", 20, None),
+            ),
+            dtype="float32",
+        )
         result = t.make_sample()
 
         assert isinstance(result, xr.DataArray)
@@ -386,9 +428,15 @@ class TestTypeDescMakeSample:
         import pandas as pd
 
         t = TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int32"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int32"),
+            ),
         )
         result = t.make_sample()
 
@@ -400,7 +448,7 @@ class TestTypeDescMakeSample:
         """make_sample creates pandas Series for series kind."""
         import pandas as pd
 
-        t = TypeDesc(kind="series", dtype="int64")
+        t = TypeDesc(kind="pandas.Series", dtype="int64")
         result = t.make_sample()
 
         assert isinstance(result, pd.Series)
@@ -411,7 +459,7 @@ class TestTypeDescMakeSample:
         """make_sample creates DrJit array for drjit kind."""
         from drjit import llvm
 
-        t = TypeDesc(kind="drjit", drjit_type=llvm.Float64, dtype="float64")
+        t = TypeDesc(kind="drjit.Array", drjit_type=llvm.Float64, dtype="float64")
         result = t.make_sample()
 
         assert type(result) is llvm.Float64
@@ -421,7 +469,17 @@ class TestTypeDescMakeSample:
         """make_sample works for columnar kind (Arrow tables)."""
         import pyarrow as pa
 
-        t = TypeDesc(kind="columnar", columns=["a", "b"], dtypes={"a": "int64", "b": "float64"})
+        t = TypeDesc(
+            kind="pyarrow.Table",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "int64"),
+                ("b", "float64"),
+            ),
+        )
         result = t.make_sample()
 
         assert isinstance(result, pa.Table)
@@ -430,7 +488,9 @@ class TestTypeDescMakeSample:
 
     def test_make_sample_class_not_implemented(self) -> None:
         """make_sample raises NotImplementedError for class kind."""
-        t = TypeDesc(kind="class", fields={"x": TypeDesc(kind="ndarray", dims={"a": 1})})
+        t = TypeDesc(
+            kind="record", fields=(("x", TypeDesc(kind="numpy.ndarray", dims=(("a", 1, None),))),)
+        )
 
         with pytest.raises(NotImplementedError, match="make_sample not implemented"):
             t.make_sample()
