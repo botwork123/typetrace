@@ -25,14 +25,23 @@ def skip_if_no_pyarrow():
 
 
 def skip_if_no_drjit():
-    return find_spec("drjit") is None
+    if find_spec("drjit") is None:
+        return True
+    try:
+        import drjit
+
+        return not bool(drjit.has_backend(drjit.JitBackend.LLVM))
+    except Exception:
+        return True
 
 
 pandas_required = pytest.mark.skipif(skip_if_no_pandas(), reason="pandas not installed")
 xarray_required = pytest.mark.skipif(skip_if_no_xarray(), reason="xarray not installed")
 polars_required = pytest.mark.skipif(skip_if_no_polars(), reason="polars not installed")
 pyarrow_required = pytest.mark.skipif(skip_if_no_pyarrow(), reason="pyarrow not installed")
-drjit_required = pytest.mark.skipif(skip_if_no_drjit(), reason="drjit not installed")
+drjit_required = pytest.mark.skipif(
+    skip_if_no_drjit(), reason="drjit is not installed or its LLVM backend is unavailable"
+)
 
 
 class TestSymbol:
