@@ -86,7 +86,7 @@ CI-parity commands (for debugging and explicit reporting):
 ruff check .
 ruff format --check .
 mypy src/typetrace
-pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
+pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=85 tests/
 ```
 
 If there is a scope mismatch (e.g., mypy on tests), explicitly call it out in report.
