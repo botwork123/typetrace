@@ -8,6 +8,17 @@ from typing import Any
 
 from typetrace.core import TypeDesc
 
+ADAPTER_KINDS = ("polars.Series", "polars.DataFrame")
+OPERATIONS: dict[tuple[str, str], Any] = {}
+
+
+def supports(value: object) -> bool:
+    """Return whether value is a Polars Series or DataFrame."""
+    import polars as pl
+
+    return isinstance(value, (pl.Series, pl.DataFrame))
+
+
 # Polars dtype mapping (polars string -> polars dtype)
 POLARS_DTYPE_MAP = {
     "Float64": "Float64",
@@ -133,3 +144,26 @@ def make_polars_series_sample(type_desc: TypeDesc) -> Any:
     dtype = _get_polars_dtype(dtype_str)
 
     return pl.Series(name="", values=[], dtype=dtype)
+
+
+def infer(value: object) -> TypeDesc:
+    """Protocol entry point for Polars inference."""
+    return from_polars(value)
+
+
+def make_sample(desc: TypeDesc) -> object:
+    """Protocol entry point for Polars sample creation."""
+    return (
+        make_polars_dataframe_sample(desc)
+        if desc.kind == "polars.DataFrame"
+        else make_polars_series_sample(desc)
+    )
+
+
+def validate(desc: TypeDesc, value: object) -> None:
+    """Validate a Polars sample against its nominal kind."""
+    import polars as pl
+
+    expected = pl.DataFrame if desc.kind == "polars.DataFrame" else pl.Series
+    if desc.kind not in ADAPTER_KINDS or not isinstance(value, expected):
+        raise TypeError(f"expected {desc.kind} sample, got {type(value)!r}")

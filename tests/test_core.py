@@ -499,11 +499,11 @@ class TestTypeDescMakeSample:
         assert result.column_names == ["a", "b"]
         assert result.num_rows == 0
 
-    def test_make_sample_class_not_implemented(self) -> None:
-        """make_sample raises NotImplementedError for class kind."""
+    def test_make_sample_record(self) -> None:
+        """make_sample materializes a record through the core adapter."""
         t = TypeDesc(
             kind="record", fields=(("x", TypeDesc(kind="numpy.ndarray", dims=(("a", 1, None),))),)
         )
 
-        with pytest.raises(NotImplementedError, match="make_sample not implemented"):
-            t.make_sample()
+        result = t.make_sample()
+        assert hasattr(result, "x")

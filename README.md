@@ -79,14 +79,16 @@ from typetrace.inference import infer_by_execution
 import pandas as pd
 
 left_t = TypeDesc(
-    kind='dataframe',
-    columns=['id', 'value', ...],  # ellipsis => known columns + unknown extras
-    dtypes={'id': 'int64', 'value': 'float64'},
+    kind='pandas.DataFrame',
+    columns=('id', 'value', ...),  # trailing ellipsis => known columns + unknown extras
+    dtypes=(('id', 'int64'), ('value', 'float64')),
 )
 right_t = TypeDesc.from_value(right_df)
 
 # Let pandas figure out the output type
-result_t = infer_by_execution(pd.merge, left_t, right_t, how='left', on='id')
+result_t = infer_by_execution(
+    pd.merge, left_t, right_t, call_kwargs={'how': 'left', 'on': 'id'}
+)
 ```
 
 ## Integration with DAG Systems

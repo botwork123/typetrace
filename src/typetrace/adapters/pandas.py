@@ -9,6 +9,16 @@ from typing import Any
 
 from typetrace.core import Dims, TypeDesc
 
+ADAPTER_KINDS = ("pandas.Series", "pandas.DataFrame")
+OPERATIONS: dict[tuple[str, str], Any] = {}
+
+
+def supports(value: object) -> bool:
+    """Return whether value is a pandas Series or DataFrame."""
+    import pandas as pd
+
+    return isinstance(value, (pd.Series, pd.DataFrame))
+
 
 def from_pandas(value: Any) -> TypeDesc:
     """
@@ -94,8 +104,7 @@ def _build_index(index_desc: Dims | None, rows: int) -> Any:
     entries = list(index_desc)
     names = [name for name, _, _ in entries]
     sizes = [
-        max(int(size) if isinstance(size, int) else _default_sample_size(), 1)
-        for _, size, _ in entries
+        int(size) if isinstance(size, int) else _default_sample_size() for _, size, _ in entries
     ]
     levels = [_index_values(name, size) for name, size in zip(names, sizes)]
     return (
@@ -128,3 +137,24 @@ def make_series_sample(type_desc: TypeDesc) -> Any:
     index = _build_index(type_desc.index, _default_sample_size())
     data = _series_values(dtype, len(index))
     return pd.Series(data, index=index, dtype=dtype)
+
+
+def infer(value: object) -> TypeDesc:
+    """Protocol entry point for pandas inference."""
+    return from_pandas(value)
+
+
+def make_sample(desc: TypeDesc) -> object:
+    """Protocol entry point for pandas sample creation."""
+    return (
+        make_dataframe_sample(desc) if desc.kind == "pandas.DataFrame" else make_series_sample(desc)
+    )
+
+
+def validate(desc: TypeDesc, value: object) -> None:
+    """Validate a pandas sample against its nominal kind."""
+    import pandas as pd
+
+    expected = pd.DataFrame if desc.kind == "pandas.DataFrame" else pd.Series
+    if desc.kind not in ADAPTER_KINDS or not isinstance(value, expected):
+        raise TypeError(f"expected {desc.kind} sample, got {type(value)!r}")

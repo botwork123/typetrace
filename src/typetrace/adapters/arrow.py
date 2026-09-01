@@ -8,6 +8,16 @@ from typing import Any
 
 from typetrace.core import TypeDesc
 
+ADAPTER_KINDS = ("pyarrow.Array", "pyarrow.Table")
+OPERATIONS: dict[tuple[str, str], Any] = {}
+
+
+def supports(value: object) -> bool:
+    """Return whether value is an Arrow Array or Table."""
+    import pyarrow as pa
+
+    return isinstance(value, (pa.Array, pa.Table))
+
 
 def from_arrow(value: Any) -> TypeDesc:
     """
@@ -101,3 +111,26 @@ def make_arrow_array_sample(type_desc: TypeDesc) -> Any:
     arrow_type = _get_arrow_type(dtype_str)
 
     return pa.array([], type=arrow_type)
+
+
+def infer(value: object) -> TypeDesc:
+    """Protocol entry point for Arrow inference."""
+    return from_arrow(value)
+
+
+def make_sample(desc: TypeDesc) -> object:
+    """Protocol entry point for Arrow sample creation."""
+    return (
+        make_arrow_table_sample(desc)
+        if desc.kind == "pyarrow.Table"
+        else make_arrow_array_sample(desc)
+    )
+
+
+def validate(desc: TypeDesc, value: object) -> None:
+    """Validate an Arrow sample against its nominal kind."""
+    import pyarrow as pa
+
+    expected = pa.Table if desc.kind == "pyarrow.Table" else pa.Array
+    if desc.kind not in ADAPTER_KINDS or not isinstance(value, expected):
+        raise TypeError(f"expected {desc.kind} sample, got {type(value)!r}")

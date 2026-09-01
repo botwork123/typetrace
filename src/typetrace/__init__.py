@@ -24,7 +24,7 @@ from typetrace.errors import (
     UnsupportedOperationError,
 )
 from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
-from typetrace.inference import TypeContext, infer_types
+from typetrace.inference import TypeContext, infer_by_execution, infer_types, make_samples
 from typetrace.layout_ops import (
     check_handoff_compatibility,
     concat_traits,
@@ -41,6 +41,8 @@ __all__ = [
     "Dims",
     "concrete_transform",
     "infer_types",
+    "infer_by_execution",
+    "make_samples",
     "TypeContext",
     "ExecutionTraits",
     "infer_execution_traits",

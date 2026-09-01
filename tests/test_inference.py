@@ -5,6 +5,12 @@ from dataclasses import dataclass
 import pytest
 
 from typetrace.core import Symbol, TypeDesc
+from typetrace.errors import (
+    OperationBindingError,
+    OperationExecutionError,
+    ResultInferenceError,
+    SampleMaterializationError,
+)
 from typetrace.inference import TypeContext, infer_by_execution, infer_types
 
 
@@ -355,7 +361,7 @@ class TestInferByExecution:
             return arr * factor
 
         input_type = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
-        result = infer_by_execution(scale_values, input_type, factor=2.0)
+        result = infer_by_execution(scale_values, input_type, call_kwargs={"factor": 2.0})
 
         assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
@@ -501,3 +507,65 @@ class TestInferByExecution:
 
         assert result.kind == "pandas.DataFrame"
         assert result.columns == ("a",)
+
+    def test_v16_binding_uses_call_args_and_call_kwargs(self) -> None:
+        def operation(first, second=2, *rest, flag=False):
+            return first + second + sum(rest) + int(flag)
+
+        result = infer_by_execution(
+            operation,
+            TypeDesc(kind="scalar", dtype="int64"),
+            call_args=(3, 4),
+            call_kwargs={"flag": True},
+        )
+
+        assert result == TypeDesc(kind="scalar", dtype="int64")
+
+    @pytest.mark.parametrize(
+        "call_args,call_kwargs,error,path",
+        [
+            ((), {}, OperationBindingError, "argument"),
+            ((1,), {"unknown": 2}, OperationBindingError, "unknown"),
+            ((1,), {"first": 2}, OperationBindingError, "first"),
+        ],
+    )
+    def test_v16_binding_errors_are_typed(self, call_args, call_kwargs, error, path: str) -> None:
+        def operation(first, required):
+            return first + required
+
+        with pytest.raises(error, match=path):
+            infer_by_execution(
+                operation,
+                TypeDesc(kind="scalar", dtype="int64"),
+                call_args=call_args,
+                call_kwargs=call_kwargs,
+                operation_name="binding-test",
+            )
+
+    def test_v16_sampling_execution_and_result_errors_are_typed(self, monkeypatch) -> None:
+        def explode(value):
+            raise RuntimeError("boom")
+
+        with pytest.raises(SampleMaterializationError, match="input_types.0"):
+            infer_by_execution(
+                lambda value: value,
+                TypeDesc(kind="unknown.kind"),
+                operation_name="sample-test",
+            )
+        with pytest.raises(OperationExecutionError, match="boom"):
+            infer_by_execution(
+                explode,
+                TypeDesc(kind="scalar", dtype="int64"),
+                operation_name="execution-test",
+            )
+
+        def fail_from_value(cls, value):
+            raise RuntimeError("cannot infer result")
+
+        monkeypatch.setattr(TypeDesc, "from_value", classmethod(fail_from_value))
+        with pytest.raises(ResultInferenceError, match="output"):
+            infer_by_execution(
+                lambda value: object(),
+                TypeDesc(kind="scalar", dtype="int64"),
+                operation_name="result-test",
+            )
