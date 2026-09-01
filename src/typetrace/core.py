@@ -104,6 +104,11 @@ class ResultInferenceError(TypeDescError):
     """An executed result could not be converted into a TypeDesc."""
 
 
+def _operation_error(exc: TypeDescError, operation: str) -> TypeDescError:
+    """Attach the public verb name while preserving the named error/path."""
+    return type(exc)(str(exc), operation=operation, path=exc.path)
+
+
 def _freeze_metadata(value: Any, _seen: set[int] | None = None) -> Hashable:
     """Convert metadata containers to deterministic immutable tuples."""
     seen = _seen if _seen is not None else set()
@@ -573,6 +578,119 @@ class TypeDesc:
     def with_dtype(self, dtype: str) -> "TypeDesc":
         """Return copy with updated dtype."""
         return replace(self, dtype=dtype)
+
+    def binary(self, other: "TypeDesc", operation: str) -> "TypeDesc":
+        """Apply a pure binary structural operation."""
+        from typetrace.patterns import _binary_type_desc
+
+        try:
+            return _binary_type_desc(self, other, operation)
+        except TypeDescError as exc:
+            raise _operation_error(exc, operation) from exc
+
+    def unary(self, operation: str) -> "TypeDesc":
+        """Apply a pure unary structural operation."""
+        from typetrace.patterns import _unary_type_desc
+
+        try:
+            return _unary_type_desc(self, operation)
+        except TypeDescError as exc:
+            raise _operation_error(exc, operation) from exc
+
+    def method(
+        self,
+        name: str,
+        args: tuple[object, ...] = (),
+        kwargs: Mapping[str, object] | None = None,
+    ) -> "TypeDesc":
+        """Apply a registered pure method operation."""
+        from typetrace.patterns import _method_type_desc
+
+        try:
+            return _method_type_desc(self, name, args, kwargs or {})
+        except TypeDescError as exc:
+            raise _operation_error(exc, name) from exc
+
+    def project(self, field: Hashable) -> "TypeDesc":
+        """Project one record or Dataset field."""
+        from typetrace.patterns import _project_type_desc
+
+        try:
+            return _project_type_desc(self, field)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "project") from exc
+
+    def select(self, fields: tuple[Hashable, ...]) -> "TypeDesc":
+        """Select an ordered subset of record fields or table columns."""
+        from typetrace.patterns import _select_type_desc
+
+        try:
+            return _select_type_desc(self, fields)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "select") from exc
+
+    def reduce(self, dimensions: tuple[str, ...], operation: str) -> "TypeDesc":
+        """Reduce exactly the named dimensions with a finite operation."""
+        from typetrace.patterns import _reduce_type_desc
+
+        try:
+            return _reduce_type_desc(self, dimensions, operation)
+        except TypeDescError as exc:
+            raise _operation_error(exc, operation) from exc
+
+    def broadcast(self, other: "TypeDesc") -> "TypeDesc":
+        """Combine descriptors using named-dimension broadcast rules."""
+        from typetrace.patterns import _combine_type_desc
+
+        try:
+            return _combine_type_desc(self, other, append_disjoint=True)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "broadcast") from exc
+
+    def unify(self, other: "TypeDesc") -> "TypeDesc":
+        """Unify compatible descriptors without adding dimensions."""
+        from typetrace.patterns import _combine_type_desc
+
+        try:
+            return _combine_type_desc(self, other, append_disjoint=False)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "unify") from exc
+
+    def reshape(self, shape_or_dimensions: object) -> "TypeDesc":
+        """Replace positional shape or named dimensions after validation."""
+        from typetrace.patterns import _reshape_type_desc
+
+        try:
+            return _reshape_type_desc(self, shape_or_dimensions)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "reshape") from exc
+
+    def add_dim(self, name: str, size: DimValue, position: int | None = None) -> "TypeDesc":
+        """Insert one unlabeled named dimension."""
+        from typetrace.patterns import _add_dim_type_desc
+
+        try:
+            return _add_dim_type_desc(self, name, size, position)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "add_dim") from exc
+
+    def remove_dim(self, name: str) -> "TypeDesc":
+        """Remove one named dimension."""
+        from typetrace.patterns import _remove_dim_type_desc
+
+        try:
+            return _remove_dim_type_desc(self, name)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "remove_dim") from exc
+
+    def rename_axis(self, old: str, new: str) -> "TypeDesc":
+        """Rename one named dimension."""
+        from typetrace.patterns import _rename_axis_type_desc
+
+        try:
+            return _rename_axis_type_desc(self, old, new)
+        except TypeDescError as exc:
+            raise _operation_error(exc, "rename_axis") from exc
 
     @classmethod
     def from_value(cls, value: Any, *, _seen: set[int] | None = None) -> "TypeDesc":
