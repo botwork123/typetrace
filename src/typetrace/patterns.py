@@ -7,9 +7,20 @@ Most calcs use one of these patterns, so we avoid duplicating logic.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
-from typetrace.core import Dims, DimValue, Symbol
+from typetrace.core import (
+    Dims,
+    DimValue,
+    OperationBindingError,
+    Symbol,
+    TypeDesc,
+    TypeDescConflictError,
+    TypeDescUnknownError,
+    UnsupportedOperationError,
+)
 
 if TYPE_CHECKING:
     from typetrace.core import TypeDesc
@@ -223,7 +234,7 @@ _COMPARISON_OPS = frozenset(
 )
 
 # True division always returns float
-_FLOAT_RESULT_OPS = frozenset({"truediv", "/"})
+_FLOAT_RESULT_OPS = frozenset({"truediv", "div", "/"})
 
 # Floor division returns int
 _INT_RESULT_OPS_BINARY = frozenset({"floordiv", "//"})
@@ -339,6 +350,317 @@ def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
     new_dims = broadcast(left.dims, right.dims)
     new_dtype = binary_result_dtype(left.dtype, right.dtype, operation)
 
-    from dataclasses import replace
-
     return replace(left, dims=new_dims, dtype=new_dtype)
+
+
+# =============================================================================
+# TypeDesc v2 pure structural algebra
+# =============================================================================
+
+_BINARY_OPERATIONS = frozenset({"add", "sub", "mul", "div", "eq", "ne", "lt", "le", "gt", "ge"})
+_UNARY_OPERATIONS = frozenset({"neg", "pos", "invert", "abs"})
+_REDUCE_OPERATIONS = frozenset({"sum", "mean", "min", "max", "count"})
+_METHOD_OPERATIONS = _REDUCE_OPERATIONS | {"astype"}
+
+
+def _merge_labels(
+    left: tuple[Any, ...] | None,
+    right: tuple[Any, ...] | None,
+    path: tuple[str | int, ...],
+) -> tuple[Any, ...] | None:
+    if left is None and right is None:
+        return None
+    if left is None or right is None:
+        raise TypeDescUnknownError("one descriptor has unknown labels", path=path)
+    if left != right:
+        raise TypeDescConflictError("labels differ", path=path)
+    return left
+
+
+def _merge_dims(left: Dims | None, right: Dims | None, *, append_disjoint: bool) -> Dims | None:
+    if left is None and right is None:
+        return None
+    left_entries = list(left or ())
+    right_entries = list(right or ())
+    right_by_name = {name: (size, labels) for name, size, labels in right_entries}
+    result: list[tuple[str, DimValue, tuple[Any, ...] | None]] = []
+    for name, size, labels in left_entries:
+        if name not in right_by_name:
+            if not append_disjoint and right_entries:
+                raise TypeDescConflictError(f"dimension {name!r} is absent from right descriptor")
+            result.append((name, size, labels))
+            continue
+        other_size, other_labels = right_by_name[name]
+        if size != other_size:
+            raise TypeDescConflictError(f"dimension {name!r} sizes differ")
+        result.append((name, size, _merge_labels(labels, other_labels, ("dims", name, "labels"))))
+    if append_disjoint:
+        left_names = {name for name, _, _ in left_entries}
+        result.extend(entry for entry in right_entries if entry[0] not in left_names)
+    elif any(name not in {item[0] for item in left_entries} for name, _, _ in right_entries):
+        raise TypeDescConflictError("descriptors have disjoint dimensions")
+    return tuple(result)
+
+
+def _merge_equal_payload(left: TypeDesc, right: TypeDesc, field: str) -> object:
+    left_value = getattr(left, field)
+    right_value = getattr(right, field)
+    if left_value != right_value:
+        raise TypeDescConflictError(f"{field} differs", path=(field,))
+    return left_value
+
+
+def _combine_type_desc(left: TypeDesc, right: TypeDesc, *, append_disjoint: bool) -> TypeDesc:
+    if left.kind != right.kind:
+        raise TypeDescConflictError("nominal kinds differ", path=("kind",))
+    if left.metadata != right.metadata:
+        raise TypeDescConflictError("metadata differs", path=("metadata",))
+    dims = _merge_dims(left.dims, right.dims, append_disjoint=append_disjoint)
+    index = _merge_dims(left.index, right.index, append_disjoint=append_disjoint)
+    for field in ("shape", "columns", "dtypes", "fields", "drjit_type", "static_dims"):
+        _merge_equal_payload(left, right, field)
+    return replace(left, dims=dims, index=index)
+
+
+def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
+    if left.dtype is None and right.dtype is None:
+        raise UnsupportedOperationError(f"binary {operation!r} requires an element dtype")
+    combined = _combine_type_desc(left, right, append_disjoint=False)
+    return replace(combined, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+
+
+def _binary_type_desc(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
+    if not isinstance(right, TypeDesc):
+        raise TypeDescConflictError("binary operand must be a TypeDesc", path=("other",))
+    try:
+        callback = STRUCTURAL_OPERATIONS[(left.kind, operation)]
+    except KeyError as exc:
+        raise UnsupportedOperationError(
+            f"unsupported binary operation {operation!r} for kind {left.kind!r}"
+        ) from exc
+    return cast(TypeDesc, callback(left, (right,), {}))
+
+
+def _unary_type_desc(td: TypeDesc, operation: str) -> TypeDesc:
+    try:
+        callback = STRUCTURAL_OPERATIONS[(td.kind, operation)]
+    except KeyError as exc:
+        raise UnsupportedOperationError(
+            f"unsupported unary operation {operation!r} for kind {td.kind!r}"
+        ) from exc
+    return cast(TypeDesc, callback(td, (), {}))
+
+
+def _unary_impl(td: TypeDesc, operation: str) -> TypeDesc:
+    return replace(td, dtype=unary_result_dtype(td.dtype, operation))
+
+
+def _reduced(td: TypeDesc, dimensions: tuple[str, ...], operation: str) -> TypeDesc:
+    if operation == "count" and td.dtype is None:
+        raise UnsupportedOperationError(f"count is unsupported for kind {td.kind!r}")
+    if td.dims is None:
+        if dimensions:
+            raise TypeDescUnknownError("descriptor has no named dimensions", path=("dims",))
+        return replace(td, dtype="int64" if operation == "count" else td.dtype)
+    dims = list(td.dims or ())
+    names = {name for name, _, _ in dims}
+    missing = [name for name in dimensions if name not in names]
+    if missing:
+        raise TypeDescUnknownError(f"unknown dimensions: {missing}", path=("dims",))
+    removed = set(dimensions)
+    dtype = "int64" if operation == "count" else td.dtype
+    return replace(td, dims=tuple(entry for entry in dims if entry[0] not in removed), dtype=dtype)
+
+
+def _method_impl(
+    td: TypeDesc, name: str, args: tuple[object, ...], kwargs: Mapping[str, object]
+) -> TypeDesc:
+    if name == "astype":
+        if td.dtype is None:
+            raise UnsupportedOperationError(f"astype is unsupported for kind {td.kind!r}")
+        dtype = kwargs.get("dtype", args[0] if len(args) == 1 else None)
+        if not isinstance(dtype, str) or len(args) > 1 or (args and "dtype" in kwargs):
+            raise OperationBindingError("astype requires exactly one string dtype")
+        return replace(td, dtype=dtype)
+    if (
+        len(args) > 1
+        or (args and ("dim" in kwargs or "axis" in kwargs))
+        or ("dim" in kwargs and "axis" in kwargs)
+    ):
+        raise OperationBindingError("reduction accepts at most one dimension argument")
+    dimensions = kwargs.get("dim", kwargs.get("axis", args[0] if args else None))
+    if dimensions is None:
+        selected: tuple[str, ...] = tuple(name for name, _, _ in (td.dims or ()))
+    elif isinstance(dimensions, str):
+        selected = (dimensions,)
+    elif isinstance(dimensions, (tuple, list)) and all(
+        isinstance(item, str) for item in dimensions
+    ):
+        selected = tuple(dimensions)
+    else:
+        raise OperationBindingError("reduction dimension must be a string or tuple of strings")
+    return _reduced(td, selected, name)
+
+
+def _method_type_desc(
+    td: TypeDesc, name: str, args: tuple[object, ...], kwargs: Mapping[str, object]
+) -> TypeDesc:
+    try:
+        callback = STRUCTURAL_OPERATIONS[(td.kind, name)]
+    except KeyError as exc:
+        raise UnsupportedOperationError(
+            f"unsupported method {name!r} for kind {td.kind!r}"
+        ) from exc
+    return cast(TypeDesc, callback(td, args, kwargs))
+
+
+def _project_type_desc(td: TypeDesc, field: Any) -> TypeDesc:
+    if td.fields is None:
+        raise TypeDescUnknownError("fields are unknown", path=("fields",))
+    for name, descriptor in td.fields:
+        if name == field:
+            return descriptor
+    raise KeyError(field)
+
+
+def _select_type_desc(td: TypeDesc, fields: tuple[Any, ...]) -> TypeDesc:
+    if not fields or len(set(fields)) != len(fields):
+        raise OperationBindingError("select requires unique non-empty fields")
+    if td.kind == "record" and td.fields is not None:
+        mapping = dict(td.fields)
+        if any(field not in mapping for field in fields):
+            missing = next(field for field in fields if field not in mapping)
+            raise KeyError(missing)
+        return replace(td, fields=tuple((field, mapping[field]) for field in fields))
+    if td.kind not in {"pandas.DataFrame", "polars.DataFrame", "pyarrow.Table"}:
+        raise UnsupportedOperationError(f"select is unsupported for kind {td.kind!r}")
+    if td.columns is None:
+        raise TypeDescUnknownError("columns are unknown", path=("columns",))
+    known = set(td.columns)
+    if any(field not in known for field in fields):
+        missing = next(field for field in fields if field not in known)
+        raise KeyError(missing)
+    dtypes = (
+        None
+        if td.dtypes is None
+        else tuple((field, dtype) for field, dtype in td.dtypes if field in fields)
+    )
+    return replace(td, columns=fields, dtypes=dtypes)
+
+
+def _reduce_type_desc(td: TypeDesc, dimensions: tuple[str, ...], operation: str) -> TypeDesc:
+    if operation not in _REDUCE_OPERATIONS:
+        raise UnsupportedOperationError(f"unsupported reduction {operation!r}")
+    return _reduced(td, dimensions, operation)
+
+
+def _reshape_type_desc(td: TypeDesc, value: object) -> TypeDesc:
+    if isinstance(value, (tuple, list)) and all(isinstance(item, int) for item in value):
+        new_shape = tuple(value)
+        if any(item < 0 for item in new_shape):
+            raise OperationBindingError("reshape dimensions must be non-negative")
+        old_shape = td.shape or tuple(size for _, size, _ in (td.dims or ()))
+        if old_shape and all(isinstance(item, int) for item in old_shape):
+            old_product = 1
+            for item in old_shape:
+                old_product *= item if isinstance(item, int) else 1
+            new_product = 1
+            for item in new_shape:
+                new_product *= item if isinstance(item, int) else 1
+            if old_product != new_product:
+                raise TypeDescConflictError("reshape changes element count", path=("shape",))
+        return replace(td, shape=new_shape, dims=None)
+    if isinstance(value, (tuple, list)):
+        new_dims = tuple(tuple(entry) if isinstance(entry, list) else entry for entry in value)
+        old_shape = td.shape or tuple(size for _, size, _ in (td.dims or ()))
+        new_shape = tuple(entry[1] for entry in new_dims)
+        if (
+            old_shape
+            and all(isinstance(item, int) for item in old_shape)
+            and all(
+                isinstance(item, (tuple, list)) and len(item) >= 2 and isinstance(item[1], int)
+                for item in new_dims
+            )
+        ):
+            old_product = 1
+            for item in old_shape:
+                old_product *= item if isinstance(item, int) else 1
+            new_product = 1
+            for item in new_shape:
+                new_product *= item if isinstance(item, int) else 1
+            if old_product != new_product:
+                raise TypeDescConflictError("reshape changes element count", path=("dims",))
+        return replace(td, dims=new_dims, shape=None)
+    raise OperationBindingError("reshape requires a shape or dimensions sequence")
+
+
+def _add_dim_type_desc(td: TypeDesc, name: str, size: DimValue, position: int | None) -> TypeDesc:
+    dims = list(td.dims or ())
+    if any(existing == name for existing, _, _ in dims):
+        raise TypeDescConflictError(f"dimension {name!r} already exists", path=("dims", name))
+    entry = (name, size, None)
+    index = len(dims) if position is None else position
+    if index < 0 or index > len(dims):
+        raise OperationBindingError("dimension position is out of range")
+    dims.insert(index, entry)
+    return replace(td, dims=tuple(dims))
+
+
+def _remove_dim_type_desc(td: TypeDesc, name: str) -> TypeDesc:
+    dims = list(td.dims or ())
+    if not any(existing == name for existing, _, _ in dims):
+        raise TypeDescUnknownError(f"unknown dimension {name!r}", path=("dims", name))
+    return replace(td, dims=tuple(entry for entry in dims if entry[0] != name))
+
+
+def _rename_axis_type_desc(td: TypeDesc, old: str, new: str) -> TypeDesc:
+    dims = list(td.dims or ())
+    if not any(name == old for name, _, _ in dims):
+        raise TypeDescUnknownError(f"unknown dimension {old!r}", path=("dims", old))
+    if any(name == new for name, _, _ in dims):
+        raise TypeDescConflictError(f"dimension {new!r} already exists", path=("dims", new))
+    return replace(
+        td, dims=tuple((new if name == old else name, size, labels) for name, size, labels in dims)
+    )
+
+
+def _build_structural_operations() -> dict[tuple[str, str], Any]:
+    kinds = (
+        "scalar",
+        "numpy.ndarray",
+        "xarray.DataArray",
+        "xarray.Dataset",
+        "pandas.Series",
+        "pandas.DataFrame",
+        "polars.Series",
+        "polars.DataFrame",
+        "pyarrow.Array",
+        "pyarrow.Table",
+        "drjit.Array",
+        "record",
+        "opaque",
+    )
+    operations: dict[tuple[str, str], Any] = {}
+    for kind in kinds:
+        operations.update(
+            {
+                (kind, name): (lambda td, args, kwargs, op=name: _binary_impl(td, args[0], op))
+                for name in _BINARY_OPERATIONS
+            }
+        )
+        operations.update(
+            {
+                (kind, name): (lambda td, args, kwargs, op=name: _unary_impl(td, op))
+                for name in _UNARY_OPERATIONS
+            }
+        )
+        operations.update(
+            {
+                (kind, name): (lambda td, args, kwargs, op=name: _method_impl(td, op, args, kwargs))
+                for name in _METHOD_OPERATIONS
+            }
+        )
+    return operations
+
+
+STRUCTURAL_OPERATIONS: Mapping[tuple[str, str], Any] = _build_structural_operations()
