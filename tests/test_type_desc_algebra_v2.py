@@ -233,6 +233,36 @@ def test_named_axes_survive_matrix_methods() -> None:
     )
 
 
+def test_stack_accepts_named_axis_and_promotes_dtype() -> None:
+    value = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("column", 3, None)), dtype="float32")
+    other = value.with_dtype("float64")
+    result = value.method("stack", args=((other,),), kwargs={"axis": "column"})
+    assert result.dims == (
+        ("row", 2, None),
+        ("stack1", 2, None),
+        ("column", 3, None),
+    )
+    assert result.dtype == "float64"
+
+
+def test_drjit_static_shape_is_used_and_updated() -> None:
+    value = TypeDesc("drjit.Array", static_dims=(2, 3), dtype="float32")
+    other = TypeDesc("drjit.Array", static_dims=(3, 4), dtype="float64")
+    result = value.method("matmul", args=(other,), kwargs={})
+    assert result.shape == (2, 4)
+    assert result.static_dims == (2, 4)
+    assert result.dtype == "float64"
+
+
+def test_matrix_methods_preserve_named_axes_when_other_operand_is_positional() -> None:
+    left = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("inner", 3, None)), dtype="float64")
+    right = TypeDesc("numpy.ndarray", shape=(3, 4), dtype="float64")
+    assert left.method("matmul", args=(right,), kwargs={}).dims == (
+        ("row", 2, None),
+        ("dim1", 4, None),
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "args", "kwargs", "message"),
     [

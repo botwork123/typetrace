@@ -485,6 +485,8 @@ def _method_operand(td: TypeDesc, name: str, args: tuple[object, ...]) -> TypeDe
 def _method_shape(td: TypeDesc, name: str) -> tuple[DimValue, ...]:
     if td.shape is not None:
         return td.shape
+    if td.static_dims is not None:
+        return td.static_dims
     if td.dims is not None:
         return tuple(size for _, size, _ in td.dims)
     raise TypeDescUnknownError(f"{name}: shape is unknown", path=("shape",))
@@ -493,7 +495,19 @@ def _method_shape(td: TypeDesc, name: str) -> tuple[DimValue, ...]:
 def _method_axes(
     td: TypeDesc, name: str
 ) -> tuple[tuple[str, DimValue, tuple[Any, ...] | None], ...] | None:
-    return td.dims if td.dims is not None else None
+    if td.dims is not None:
+        return td.dims
+    if td.shape is not None:
+        return tuple((f"dim{index}", size, None) for index, size in enumerate(td.shape))
+    if td.static_dims is not None:
+        return tuple((f"dim{index}", size, None) for index, size in enumerate(td.static_dims))
+    return None
+
+
+def _static_shape(shape: tuple[DimValue, ...]) -> tuple[int, ...] | None:
+    if not all(isinstance(size, int) and not isinstance(size, bool) for size in shape):
+        return None
+    return tuple(cast(int, size) for size in shape)
 
 
 def _method_dtype(left: TypeDesc, right: TypeDesc, name: str) -> str | None:
@@ -507,10 +521,11 @@ def _method_dtype(left: TypeDesc, right: TypeDesc, name: str) -> str | None:
 
 
 def _method_result(td: TypeDesc, shape: tuple[DimValue, ...], dtype: str | None) -> TypeDesc:
+    static_dims = _static_shape(shape) if td.kind == "drjit.Array" else None
     if td.dims is not None:
         dims = tuple((f"dim{index}", size, None) for index, size in enumerate(shape))
-        return replace(td, dims=dims, shape=None, dtype=dtype)
-    return replace(td, shape=shape, dtype=dtype)
+        return replace(td, dims=dims, shape=None, dtype=dtype, static_dims=static_dims)
+    return replace(td, shape=shape, dtype=dtype, static_dims=static_dims)
 
 
 def _method_result_axes(
@@ -518,7 +533,10 @@ def _method_result_axes(
     axes: tuple[tuple[str, DimValue, tuple[Any, ...] | None], ...],
     dtype: str | None,
 ) -> TypeDesc:
-    return replace(td, dims=axes, shape=None, dtype=dtype)
+    static_dims = (
+        _static_shape(tuple(size for _, size, _ in axes)) if td.kind == "drjit.Array" else None
+    )
+    return replace(td, dims=axes, shape=None, dtype=dtype, static_dims=static_dims)
 
 
 def _matmul_method(
@@ -548,7 +566,9 @@ def _matmul_method(
     dtype = _method_dtype(td, other, "matmul")
     left_axes = _method_axes(td, "matmul")
     right_axes = _method_axes(other, "matmul")
-    if left_axes is not None and right_axes is not None:
+    if td.dims is not None or other.dims is not None:
+        if left_axes is None or right_axes is None:
+            raise TypeDescUnknownError("matmul: axes are unknown", path=("dims",))
         if len(left) == 1 and len(right) == 1:
             return _method_result_axes(td, (), dtype)
         if len(left) == 1:
@@ -570,7 +590,9 @@ def _outer_method(td: TypeDesc, args: tuple[object, ...], kwargs: Mapping[str, o
     dtype = _method_dtype(td, other, "outer")
     left_axes = _method_axes(td, "outer")
     right_axes = _method_axes(other, "outer")
-    if left_axes is not None and right_axes is not None:
+    if td.dims is not None or other.dims is not None:
+        if left_axes is None or right_axes is None:
+            raise TypeDescUnknownError("outer: axes are unknown", path=("dims",))
         if {axis[0] for axis in left_axes} & {axis[0] for axis in right_axes}:
             raise TypeDescConflictError("outer: axis names must be unique", path=("dims",))
         return _method_result_axes(td, left_axes + right_axes, dtype)
@@ -590,6 +612,11 @@ def _stack_method(td: TypeDesc, args: tuple[object, ...], kwargs: Mapping[str, o
         raise OperationBindingError("stack requires one tuple of TypeDesc operands")
     others = args[0]
     axis = kwargs.get("axis", 0)
+    if isinstance(axis, str):
+        axes = _method_axes(td, "stack")
+        if axes is None or axis not in {name for name, _, _ in axes}:
+            raise TypeDescValidationError("stack: invalid axis")
+        axis = next(index for index, (name, _, _) in enumerate(axes) if name == axis)
     if not isinstance(axis, int) or isinstance(axis, bool):
         raise TypeDescValidationError("stack: invalid axis")
     base = _method_shape(td, "stack")
@@ -600,11 +627,22 @@ def _stack_method(td: TypeDesc, args: tuple[object, ...], kwargs: Mapping[str, o
     if axis < 0 or axis > len(base):
         raise TypeDescValidationError("stack: invalid axis")
     shape = base[:axis] + (len(others) + 1,) + base[axis:]
+    dtype = td.dtype
+    for item in others:
+        if dtype is None or item.dtype is None:
+            raise TypeDescUnknownError("stack: dtype is unknown", path=("dtype",))
+        dtype = _method_dtype(
+            TypeDesc(kind="scalar", dtype=dtype),
+            TypeDesc(kind="scalar", dtype=item.dtype),
+            "stack",
+        )
     axes = _method_axes(td, "stack")
-    if axes is not None:
+    if td.dims is not None:
+        if axes is None:
+            raise TypeDescUnknownError("stack: axes are unknown", path=("dims",))
         stacked_axes = axes[:axis] + ((f"stack{axis}", len(others) + 1, None),) + axes[axis:]
-        return _method_result_axes(td, stacked_axes, td.dtype)
-    return _method_result(td, shape, td.dtype)
+        return _method_result_axes(td, stacked_axes, dtype)
+    return _method_result(td, shape, dtype)
 
 
 def _method_impl(
