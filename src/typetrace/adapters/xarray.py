@@ -9,6 +9,16 @@ from typing import Any
 
 from typetrace.core import Dims, Symbol, TypeDesc
 
+ADAPTER_KINDS = ("xarray.DataArray", "xarray.Dataset")
+OPERATIONS: dict[tuple[str, str], Any] = {}
+
+
+def supports(value: object) -> bool:
+    """Return whether value is an xarray DataArray or Dataset."""
+    import xarray as xr
+
+    return isinstance(value, (xr.DataArray, xr.Dataset))
+
 
 def from_xarray(value: Any) -> TypeDesc:
     """
@@ -42,7 +52,7 @@ def _default_sample_size() -> int:
 def _sample_dim_size(size: int | Symbol) -> int:
     if isinstance(size, Symbol):
         return _default_sample_size()
-    return size if size > 0 else _default_sample_size()
+    return size
 
 
 def _coord_values(dim_name: str, size: int) -> Any:
@@ -109,3 +119,24 @@ def make_dataset_sample(type_desc: TypeDesc) -> Any:
     data = np.arange(int(np.prod(shape)), dtype="float64").reshape(shape).astype(dtype)
     da = xr.DataArray(data, dims=dim_names, coords=coords)
     return xr.Dataset({"data": da})
+
+
+def infer(value: object) -> TypeDesc:
+    """Protocol entry point for xarray inference."""
+    return from_xarray(value)
+
+
+def make_sample(desc: TypeDesc) -> object:
+    """Protocol entry point for xarray sample creation."""
+    return (
+        make_xarray_sample(desc) if desc.kind == "xarray.DataArray" else make_dataset_sample(desc)
+    )
+
+
+def validate(desc: TypeDesc, value: object) -> None:
+    """Validate an xarray sample against its nominal kind."""
+    import xarray as xr
+
+    expected = xr.DataArray if desc.kind == "xarray.DataArray" else xr.Dataset
+    if desc.kind not in ADAPTER_KINDS or not isinstance(value, expected):
+        raise TypeError(f"expected {desc.kind} sample, got {type(value)!r}")

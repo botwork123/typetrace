@@ -5,10 +5,18 @@ Provides the inference pass that walks a DAG-like structure and computes
 output types using type_transform methods.
 """
 
+import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, cast
 
 from typetrace.core import TypeDesc
+from typetrace.errors import (
+    OperationBindingError,
+    OperationExecutionError,
+    ResultInferenceError,
+    SampleMaterializationError,
+)
 from typetrace.execution_traits import ExecutionTraits, infer_execution_traits
 from typetrace.layout_ops import check_handoff_compatibility
 from typetrace.patterns import bind_symbols
@@ -150,14 +158,67 @@ def _callable_label(fn: Callable[..., Any]) -> str:
     return repr(fn)
 
 
+def _materialize(value: object, path: tuple[str | int, ...]) -> object:
+    """Recursively replace descriptors with validated adapter samples."""
+    from typetrace.adapters import adapter_for_value, get_adapter
+
+    if isinstance(value, TypeDesc):
+        try:
+            adapter = get_adapter(value.kind)
+            sample = adapter.make_sample(value)
+            adapter.validate(value, sample)
+            return sample
+        except Exception as exc:
+            raise SampleMaterializationError(
+                f"could not materialize TypeDesc(kind={value.kind!r}): {exc}", path=path
+            ) from exc
+    if isinstance(value, tuple):
+        return tuple(_materialize(item, path + (index,)) for index, item in enumerate(value))
+    if isinstance(value, list):
+        return [_materialize(item, path + (index,)) for index, item in enumerate(value)]
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise SampleMaterializationError("mapping keys must be strings", path=path)
+            result[key] = _materialize(item, path + (key,))
+        return result
+    if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
+        return value
+    if hasattr(value, "upstream") or hasattr(value, "type_transform"):
+        raise SampleMaterializationError("Nodes cannot be materialized", path=path)
+    try:
+        adapter_for_value(value)
+    except Exception:
+        pass
+    else:
+        raise SampleMaterializationError("live backend values cannot be materialized", path=path)
+    raise SampleMaterializationError(f"unsupported sample value {type(value)!r}", path=path)
+
+
+def make_samples(
+    args: tuple[object, ...], kwargs: Mapping[str, object]
+) -> tuple[tuple[object, ...], dict[str, object]]:
+    """Materialize descriptor values in supported argument containers."""
+    if not isinstance(args, tuple):
+        raise SampleMaterializationError("args must be a tuple", path=("args",))
+    if not isinstance(kwargs, Mapping):
+        raise SampleMaterializationError("kwargs must be a mapping", path=("kwargs",))
+    return (
+        tuple(_materialize(value, ("args", index)) for index, value in enumerate(args)),
+        cast(dict[str, object], _materialize(kwargs, ("kwargs",))),
+    )
+
+
 def infer_by_execution(
     fn: Callable,
     *input_types: TypeDesc,
+    call_args: tuple[object, ...] = (),
+    call_kwargs: Mapping[str, object] | None = None,
     expected_output_traits: ExecutionTraits | None = None,
     allow_device_copy: bool = False,
     require_exact_dataframe_schema: bool = False,
     operation_name: str | None = None,
-    **kwargs: Any,
 ) -> TypeDesc:
     """
     Infer output type by executing function on sample data.
@@ -194,30 +255,54 @@ def infer_by_execution(
                     "requires exact full column set."
                 )
 
-    samples: list[Any] = []
-    for index, type_desc in enumerate(input_types):
-        try:
-            samples.append(type_desc.make_sample())
-        except Exception as exc:
-            raise ValueError(
-                f"infer_by_execution({operation}) sample-build failed for "
-                f"input index {index} (input[{index}], kind={type_desc.kind}): {exc}"
-            ) from exc
+    kwargs = dict(call_kwargs or {})
+    positional: tuple[object, ...] = tuple(input_types) + tuple(call_args)
+    signature = inspect.signature(fn)
+    placeholders = tuple(object() if isinstance(item, TypeDesc) else item for item in positional)
+    try:
+        bound = signature.bind(*placeholders, **kwargs)
+        bound.apply_defaults()
+    except TypeError as exc:
+        raise OperationBindingError(str(exc), operation=operation) from exc
 
     try:
-        result = fn(*samples, **kwargs)
+        samples, sample_kwargs = make_samples(positional, kwargs)
+    except SampleMaterializationError as exc:
+        if exc.path and exc.path[0] == "args":
+            index = exc.path[1] if len(exc.path) > 1 and isinstance(exc.path[1], int) else -1
+            if 0 <= index < len(input_types):
+                error_path = ("input_types",) + exc.path[1:]
+            else:
+                error_path = ("call_args", max(index - len(input_types), 0)) + exc.path[2:]
+        else:
+            error_path = exc.path
+        raise SampleMaterializationError(
+            f"infer_by_execution({operation}) sample-build failed for input index "
+            f"{error_path[1] if len(error_path) > 1 else '?'}: {exc}",
+            operation=operation,
+            path=error_path,
+        ) from exc
+
+    try:
+        result = fn(*samples, **sample_kwargs)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution({operation}) execution failed: {exc}") from exc
+        raise OperationExecutionError(
+            f"infer_by_execution({operation}) execution failed: {exc}", operation=operation
+        ) from exc
 
     try:
         _validate_execution_handoff(result, expected_output_traits, allow_device_copy)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution({operation}) handoff-check failed: {exc}") from exc
+        raise OperationExecutionError(
+            f"infer_by_execution({operation}) handoff-check failed: {exc}", operation=operation
+        ) from exc
 
     try:
         return TypeDesc.from_value(result)
     except Exception as exc:
-        raise ValueError(f"infer_by_execution({operation}) output-extract failed: {exc}") from exc
+        raise ResultInferenceError(
+            f"infer_by_execution({operation}) output inference failed: {exc}", operation=operation
+        ) from exc
 
 
 def _validate_execution_handoff(

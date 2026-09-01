@@ -15,9 +15,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Hashable, cast
-
-from typetrace.runtime_utils import module_root
+from typing import Any, Hashable, cast
 
 
 @dataclass(frozen=True)
@@ -591,43 +589,23 @@ class TypeDesc:
         - xarray/pandas/polars/arrow/drjit → dispatched to adapters
         - Other objects → introspected as class
         """
-        # Handle Python scalars first (before module dispatch)
-        if isinstance(value, bool):  # Must check before int since bool is subclass of int
-            return cls(kind="scalar", dtype="bool")
-        if isinstance(value, int):
-            return cls(kind="scalar", dtype="int64")
-        if isinstance(value, float):
-            return cls(kind="scalar", dtype="float64")
-        if isinstance(value, str):
-            return cls(kind="scalar", dtype="str")
-        if isinstance(value, (bytes, type(None))):
-            return cls(kind="opaque", metadata=(("value", None),))
+        from typetrace.adapters import adapter_for_value
 
-        root = module_root(value)
-        dispatch = cls._dispatch_table()
-        if root in dispatch:
-            return dispatch[root](value)
-        return cls._from_object(value, _seen=_seen)
+        if _seen is not None and id(value) in _seen:
+            return cls(kind="recursive")
 
-    @staticmethod
-    def _dispatch_table() -> dict[str, Callable[[Any], "TypeDesc"]]:
-        """Build adapter dispatch table lazily to avoid hard dependencies."""
+        try:
+            adapter = adapter_for_value(value)
+            if getattr(adapter, "__name__", "") == "typetrace.adapters.core":
+                from typetrace.runtime_utils import module_root
 
-        from typetrace.adapters.arrow import from_arrow
-        from typetrace.adapters.drjit import from_drjit
-        from typetrace.adapters.numpy import from_numpy
-        from typetrace.adapters.pandas import from_pandas
-        from typetrace.adapters.polars import from_polars
-        from typetrace.adapters.xarray import from_xarray
-
-        return {
-            "xarray": from_xarray,
-            "pandas": from_pandas,
-            "drjit": from_drjit,
-            "polars": from_polars,
-            "pyarrow": from_arrow,
-            "numpy": from_numpy,
-        }
+                is_builtin = isinstance(value, (bool, int, float, str, bytes, type(None), Mapping))
+                is_numpy_scalar = module_root(value) == "numpy"
+                if _seen is not None and not is_builtin and not is_numpy_scalar:
+                    return cls._from_object(value, _seen=_seen)
+            return adapter.infer(value)
+        except AdapterUnavailableError:
+            return cls._from_object(value, _seen=_seen)
 
     @classmethod
     def _from_object(cls, value: Any, *, _seen: set[int] | None = None) -> "TypeDesc":
@@ -658,36 +636,9 @@ class TypeDesc:
 
     def make_sample(self) -> Any:
         """Create minimal runtime sample preserving this descriptor schema."""
-        samples = self._sample_dispatch_table()
-        if self.kind not in samples:
-            raise NotImplementedError(f"make_sample not implemented for kind={self.kind}")
-        return samples[self.kind](self)
+        from typetrace.adapters import get_adapter
 
-    @staticmethod
-    def _sample_dispatch_table() -> dict[str, Callable[["TypeDesc"], Any]]:
-        """Build sample-materialization dispatch table lazily."""
-        from typetrace.adapters.arrow import make_arrow_array_sample, make_arrow_table_sample
-        from typetrace.adapters.drjit import make_drjit_sample
-        from typetrace.adapters.numpy import make_numpy_sample
-        from typetrace.adapters.pandas import make_dataframe_sample, make_series_sample
-        from typetrace.adapters.polars import (
-            make_polars_dataframe_sample,
-            make_polars_series_sample,
-        )
-        from typetrace.adapters.xarray import make_dataset_sample, make_xarray_sample
-
-        return {
-            "numpy.ndarray": make_numpy_sample,
-            "xarray.DataArray": make_xarray_sample,
-            "xarray.Dataset": make_dataset_sample,
-            "pandas.DataFrame": make_dataframe_sample,
-            "pandas.Series": make_series_sample,
-            "polars.DataFrame": make_polars_dataframe_sample,
-            "polars.Series": make_polars_series_sample,
-            "pyarrow.Table": make_arrow_table_sample,
-            "pyarrow.Array": make_arrow_array_sample,
-            "drjit.Array": make_drjit_sample,
-        }
+        return get_adapter(self.kind).make_sample(self)
 
     def field(self, name: str) -> "TypeDesc":
         """Get type descriptor for a field (opaque classes)."""

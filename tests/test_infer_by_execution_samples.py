@@ -220,7 +220,9 @@ WRAPPED_METHOD_INVENTORY = {
     "case", PANDAS_METHOD_CASES, ids=[c["method"] for c in PANDAS_METHOD_CASES]
 )
 def test_pandas_method_sample_contracts(case: dict[str, Any]) -> None:
-    result = infer_by_execution(_invoke_method(case["method"]), case["type_desc"], **case["kwargs"])
+    result = infer_by_execution(
+        _invoke_method(case["method"]), case["type_desc"], call_kwargs=case["kwargs"]
+    )
 
     assert result.kind == case["expected"].kind
     assert result.columns == case["expected"].columns
@@ -235,7 +237,9 @@ def test_pandas_method_sample_contracts(case: dict[str, Any]) -> None:
     "case", XARRAY_METHOD_CASES, ids=[c["method"] for c in XARRAY_METHOD_CASES]
 )
 def test_xarray_method_sample_contracts(case: dict[str, Any]) -> None:
-    result = infer_by_execution(_invoke_method(case["method"]), case["type_desc"], **case["kwargs"])
+    result = infer_by_execution(
+        _invoke_method(case["method"]), case["type_desc"], call_kwargs=case["kwargs"]
+    )
 
     assert result.kind == case["expected"].kind
     assert result.dims == case["expected"].dims
@@ -253,7 +257,9 @@ def test_polars_method_sample_contracts(case: dict[str, Any]) -> None:
 
         return _call
 
-    result = infer_by_execution(_polars_method(case["method"]), case["type_desc"], **case["kwargs"])
+    result = infer_by_execution(
+        _polars_method(case["method"]), case["type_desc"], call_kwargs=case["kwargs"]
+    )
 
     assert result.kind == case["expected"].kind
     assert result.columns == case["expected"].columns
@@ -274,7 +280,9 @@ def test_dask_dataframe_method_sample_contracts(case: dict[str, Any]) -> None:
 
         return _call
 
-    result = infer_by_execution(_dask_method(case["method"]), case["type_desc"], **case["kwargs"])
+    result = infer_by_execution(
+        _dask_method(case["method"]), case["type_desc"], call_kwargs=case["kwargs"]
+    )
 
     assert result.kind == case["expected"].kind
     assert result.columns == case["expected"].columns
@@ -297,7 +305,9 @@ def test_wrapped_method_inventory_covered(backend: str, cases: list[dict[str, An
 
 def test_infer_by_execution_fail_fast_sample_build_error_context() -> None:
     with pytest.raises(ValueError, match="sample-build failed") as excinfo:
-        infer_by_execution(_invoke_method("head"), TypeDesc(kind="pandas.DataFrame"), n=1)
+        infer_by_execution(
+            _invoke_method("head"), TypeDesc(kind="pandas.DataFrame"), call_kwargs={"n": 1}
+        )
 
     message = str(excinfo.value)
     assert "input index 0" in message
