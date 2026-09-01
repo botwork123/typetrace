@@ -9,6 +9,7 @@ from typetrace.errors import (
     OperationBindingError,
     TypeDescConflictError,
     TypeDescUnknownError,
+    TypeDescValidationError,
     UnsupportedOperationError,
 )
 
@@ -195,3 +196,98 @@ def test_full_operation_matrix_covers_dataset_and_opaque(td: TypeDesc) -> None:
             assert td.method(operation).kind == td.kind
     with pytest.raises(UnsupportedOperationError):
         td.method("astype", args=("float64",))
+
+
+def test_matrix_methods_preserve_nominal_kind_dtype_and_metadata() -> None:
+    left = TypeDesc("numpy.ndarray", shape=(2, 3), dtype="float32", metadata=(("unit", "USD"),))
+    right = TypeDesc("numpy.ndarray", shape=(3, 4), dtype="float64")
+    assert left.method("matmul", args=(right,), kwargs={}) == TypeDesc(
+        "numpy.ndarray", shape=(2, 4), dtype="float64", metadata=(("unit", "USD"),)
+    )
+
+
+def test_outer_and_stack_methods_have_complete_shapes() -> None:
+    vector = TypeDesc("numpy.ndarray", shape=(2,), dtype="float64")
+    other = TypeDesc("numpy.ndarray", shape=(3,), dtype="float64")
+    assert vector.method("outer", args=(other,), kwargs={}).shape == (2, 3)
+    matrix = TypeDesc("numpy.ndarray", shape=(2, 3), dtype="float64")
+    assert matrix.method("stack", args=((matrix,),), kwargs={"axis": 0}).shape == (2, 2, 3)
+
+
+def test_named_axes_survive_matrix_methods() -> None:
+    left = TypeDesc(
+        "numpy.ndarray", dims=(("row", 2, ("a", "b")), ("inner", 3, None)), dtype="float64"
+    )
+    right = TypeDesc(
+        "numpy.ndarray", dims=(("inner", 3, None), ("column", 4, None)), dtype="float64"
+    )
+    assert left.method("matmul", args=(right,), kwargs={}).dims == (
+        ("row", 2, ("a", "b")),
+        ("column", 4, None),
+    )
+    first = TypeDesc("numpy.ndarray", dims=(("left", 2, None),), dtype="float64")
+    second = TypeDesc("numpy.ndarray", dims=(("right", 3, None),), dtype="float64")
+    assert first.method("outer", args=(second,), kwargs={}).dims == (
+        ("left", 2, None),
+        ("right", 3, None),
+    )
+
+
+def test_stack_accepts_named_axis_and_promotes_dtype() -> None:
+    value = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("column", 3, None)), dtype="float32")
+    other = value.with_dtype("float64")
+    result = value.method("stack", args=((other,),), kwargs={"axis": "column"})
+    assert result.dims == (
+        ("row", 2, None),
+        ("stack1", 2, None),
+        ("column", 3, None),
+    )
+    assert result.dtype == "float64"
+
+
+def test_drjit_static_shape_is_used_and_updated() -> None:
+    value = TypeDesc("drjit.Array", static_dims=(2, 3), dtype="float32")
+    other = TypeDesc("drjit.Array", static_dims=(3, 4), dtype="float64")
+    result = value.method("matmul", args=(other,), kwargs={})
+    assert result.shape == (2, 4)
+    assert result.static_dims == (2, 4)
+    assert result.dtype == "float64"
+
+
+def test_matrix_methods_preserve_named_axes_when_other_operand_is_positional() -> None:
+    left = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("inner", 3, None)), dtype="float64")
+    right = TypeDesc("numpy.ndarray", shape=(3, 4), dtype="float64")
+    assert left.method("matmul", args=(right,), kwargs={}).dims == (
+        ("row", 2, None),
+        ("dim1", 4, None),
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "kwargs", "message"),
+    [
+        ("matmul", (TypeDesc("numpy.ndarray", shape=(4, 5), dtype="float64"),), {}, "matmul:"),
+        ("outer", (TypeDesc("numpy.ndarray", shape=(2, 3), dtype="float64"),), {}, "outer:"),
+        (
+            "stack",
+            ((TypeDesc("numpy.ndarray", shape=(2, 3), dtype="float64"),),),
+            {"axis": 4},
+            "stack:",
+        ),
+    ],
+)
+def test_matrix_methods_reject_invalid_shapes_and_axes(
+    name: str, args: tuple[object, ...], kwargs: dict[str, object], message: str
+) -> None:
+    value = TypeDesc("numpy.ndarray", shape=(2, 3), dtype="float64")
+    with pytest.raises(TypeDescValidationError, match=message):
+        value.method(name, args=args, kwargs=kwargs)
+
+
+def test_matrix_methods_are_nominal_and_unregistered_merge_is_rejected() -> None:
+    value = TypeDesc("numpy.ndarray", shape=(2,), dtype="float64")
+    other = TypeDesc("xarray.DataArray", shape=(2,), dtype="float64")
+    with pytest.raises(TypeDescConflictError):
+        value.method("outer", args=(other,), kwargs={})
+    with pytest.raises(UnsupportedOperationError, match="merge"):
+        value.method("merge", args=(value,), kwargs={"how": "inner"})
