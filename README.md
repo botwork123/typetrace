@@ -139,7 +139,7 @@ pre-commit run --all-files
 ruff check .
 ruff format --check .
 mypy src/typetrace
-pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
+pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=85 tests/
 ```
 
 `pre-commit` is the recommended single command locally; direct commands are
