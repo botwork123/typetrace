@@ -24,12 +24,12 @@ def from_xarray(value: Any) -> TypeDesc:
     import xarray as xr
 
     if isinstance(value, xr.DataArray):
-        dims: Dims = {str(name): size for name, size in zip(value.dims, value.shape)}
+        dims: Dims = tuple((str(name), size, None) for name, size in zip(value.dims, value.shape))
         dtype = str(value.dtype) if value.dtype != np.dtype("O") else "object"
-        return TypeDesc(kind="ndarray", dims=dims, dtype=dtype)
+        return TypeDesc(kind="xarray.DataArray", dims=dims, dtype=dtype)
     elif isinstance(value, xr.Dataset):
-        fields = {name: from_xarray(da) for name, da in value.data_vars.items()}
-        return TypeDesc(kind="dataset", fields=fields)
+        fields = tuple((name, from_xarray(da)) for name, da in value.data_vars.items())
+        return TypeDesc(kind="xarray.Dataset", fields=fields)
     else:
         raise TypeError(f"Expected xarray type, got {type(value)}")
 
@@ -69,8 +69,9 @@ def make_xarray_sample(type_desc: TypeDesc) -> Any:
     if type_desc.dims is None:
         raise ValueError("Cannot make xarray sample without dims")
 
-    dim_names = list(type_desc.dims.keys())
-    shape = tuple(_sample_dim_size(size) for size in type_desc.dims.values())
+    entries = list(type_desc.dims)
+    dim_names = [name for name, _, _ in entries]
+    shape = tuple(_sample_dim_size(size) for _, size, _ in entries)
     coords = {name: _coord_values(name, size) for name, size in zip(dim_names, shape)}
     dtype = type_desc.dtype or "float64"
     data = np.arange(int(np.prod(shape)), dtype="float64").reshape(shape).astype(dtype)
@@ -91,8 +92,8 @@ def make_dataset_sample(type_desc: TypeDesc) -> Any:
     if type_desc.fields:
         # Create Dataset from nested TypeDescs
         data_vars = {}
-        for name, field_td in type_desc.fields.items():
-            if field_td.kind == "ndarray" and field_td.dims:
+        for name, field_td in type_desc.fields:
+            if field_td.kind == "xarray.DataArray" and field_td.dims:
                 data_vars[name] = make_xarray_sample(field_td)
         return xr.Dataset(data_vars)
 
@@ -100,8 +101,9 @@ def make_dataset_sample(type_desc: TypeDesc) -> Any:
     if type_desc.dims is None:
         raise ValueError("Cannot make Dataset sample without dims or fields")
 
-    dim_names = list(type_desc.dims.keys())
-    shape = tuple(_sample_dim_size(size) for size in type_desc.dims.values())
+    entries = list(type_desc.dims)
+    dim_names = [name for name, _, _ in entries]
+    shape = tuple(_sample_dim_size(size) for _, size, _ in entries)
     coords = {name: _coord_values(name, size) for name, size in zip(dim_names, shape)}
     dtype = type_desc.dtype or "float64"
     data = np.arange(int(np.prod(shape)), dtype="float64").reshape(shape).astype(dtype)

@@ -43,9 +43,11 @@ def from_polars(value: Any) -> TypeDesc:
     if isinstance(value, pl.DataFrame):
         columns = value.columns
         dtypes = {col: str(value[col].dtype) for col in columns}
-        return TypeDesc(kind="dataframe", columns=columns, dtypes=dtypes)
+        return TypeDesc(
+            kind="polars.DataFrame", columns=tuple(columns), dtypes=tuple(dtypes.items())
+        )
     if isinstance(value, pl.Series):
-        return TypeDesc(kind="series", dtype=str(value.dtype))
+        return TypeDesc(kind="polars.Series", dtype=str(value.dtype))
     raise TypeError(f"Expected Polars type, got {type(value)}")
 
 
@@ -95,7 +97,7 @@ def make_polars_dataframe_sample(type_desc: TypeDesc) -> Any:
     Create minimal Polars DataFrame from TypeDesc.
 
     Args:
-        type_desc: TypeDesc with kind='dataframe'
+        type_desc: TypeDesc with kind='polars.DataFrame'
 
     Returns:
         polars.DataFrame with correct structure
@@ -106,7 +108,7 @@ def make_polars_dataframe_sample(type_desc: TypeDesc) -> Any:
     if known_columns is None:
         raise ValueError("Cannot make Polars DataFrame sample without columns")
 
-    dtypes = type_desc.dtypes or {}
+    dtypes = dict(type_desc.dtypes or ())
     schema = {}
     for col in known_columns:
         dtype_str = dtypes.get(col, "Float64")
@@ -120,7 +122,7 @@ def make_polars_series_sample(type_desc: TypeDesc) -> Any:
     Create minimal Polars Series from TypeDesc.
 
     Args:
-        type_desc: TypeDesc with kind='series'
+        type_desc: TypeDesc with kind='polars.Series'
 
     Returns:
         polars.Series with correct dtype

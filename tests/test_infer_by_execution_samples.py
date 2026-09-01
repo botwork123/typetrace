@@ -27,25 +27,43 @@ PANDAS_METHOD_CASES = [
     {
         "method": "sum",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
         "kwargs": {},
-        "expected": TypeDesc(kind="series", dtype="float64", index=None),
+        "expected": TypeDesc(kind="pandas.Series", dtype="float64", index=None),
     },
     {
         "method": "head",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
         "kwargs": {"n": 2},
         "expected": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
     },
 ]
@@ -53,15 +71,29 @@ PANDAS_METHOD_CASES = [
 XARRAY_METHOD_CASES = [
     {
         "method": "mean",
-        "type_desc": TypeDesc(kind="ndarray", dims={"time": 5, "asset": 3}, dtype="float64"),
+        "type_desc": TypeDesc(
+            kind="xarray.DataArray",
+            dims=(
+                ("time", 5, None),
+                ("asset", 3, None),
+            ),
+            dtype="float64",
+        ),
         "kwargs": {"dim": "time"},
-        "expected": TypeDesc(kind="ndarray", dims={"asset": 3}, dtype="float64"),
+        "expected": TypeDesc(kind="xarray.DataArray", dims=(("asset", 3, None),), dtype="float64"),
     },
     {
         "method": "isel",
-        "type_desc": TypeDesc(kind="ndarray", dims={"time": 5, "asset": 3}, dtype="float64"),
+        "type_desc": TypeDesc(
+            kind="xarray.DataArray",
+            dims=(
+                ("time", 5, None),
+                ("asset", 3, None),
+            ),
+            dtype="float64",
+        ),
         "kwargs": {"time": 0},
-        "expected": TypeDesc(kind="ndarray", dims={"asset": 3}, dtype="float64"),
+        "expected": TypeDesc(kind="xarray.DataArray", dims=(("asset", 3, None),), dtype="float64"),
     },
 ]
 
@@ -69,29 +101,53 @@ POLARS_METHOD_CASES = [
     {
         "method": "head",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "Float64", "b": "Int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "Float64"),
+                ("b", "Int64"),
+            ),
         ),
         "kwargs": {"n": 2},
         "expected": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "Float64", "b": "Int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "Float64"),
+                ("b", "Int64"),
+            ),
         ),
     },
     {
         "method": "tail",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "Float64", "b": "Int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "Float64"),
+                ("b", "Int64"),
+            ),
         ),
         "kwargs": {"n": 1},
         "expected": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "Float64", "b": "Int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "Float64"),
+                ("b", "Int64"),
+            ),
         ),
     },
 ]
@@ -100,29 +156,53 @@ DASK_FUNCTION_CASES = [
     {
         "method": "head",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
         "kwargs": {"n": 2},
         "expected": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
     },
     {
         "method": "compute",
         "type_desc": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
         "kwargs": {},
         "expected": TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int64"},
+            kind="polars.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int64"),
+            ),
         ),
     },
 ]
@@ -167,12 +247,9 @@ def test_xarray_method_sample_contracts(case: dict[str, Any]) -> None:
     "case", POLARS_METHOD_CASES, ids=[c["method"] for c in POLARS_METHOD_CASES]
 )
 def test_polars_method_sample_contracts(case: dict[str, Any]) -> None:
-    import polars as pl
-
     def _polars_method(method: str):
         def _call(df: Any, **kwargs: Any) -> Any:
-            pl_df = pl.from_pandas(df)
-            return getattr(pl_df, method)(**kwargs)
+            return getattr(df, method)(**kwargs)
 
         return _call
 
@@ -220,7 +297,7 @@ def test_wrapped_method_inventory_covered(backend: str, cases: list[dict[str, An
 
 def test_infer_by_execution_fail_fast_sample_build_error_context() -> None:
     with pytest.raises(ValueError, match="sample-build failed") as excinfo:
-        infer_by_execution(_invoke_method("head"), TypeDesc(kind="dataframe"), n=1)
+        infer_by_execution(_invoke_method("head"), TypeDesc(kind="pandas.DataFrame"), n=1)
 
     message = str(excinfo.value)
     assert "input index 0" in message
@@ -234,7 +311,7 @@ def test_infer_by_execution_fail_fast_execution_error_context() -> None:
     with pytest.raises(ValueError, match="execution failed") as excinfo:
         infer_by_execution(
             _boom,
-            TypeDesc(kind="dataframe", columns=["a"], dtypes={"a": "float64"}),
+            TypeDesc(kind="pandas.DataFrame", columns=("a",), dtypes=(("a", "float64"),)),
         )
 
     assert "explode" in str(excinfo.value)

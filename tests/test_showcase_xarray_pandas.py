@@ -42,8 +42,15 @@ def test_paired_recipes_present(concept: str, expected_ids: list[str]) -> None:
     [
         (
             lambda da: (da * (da.mean("time") / da.mean("time").sum())).sum("asset"),
-            TypeDesc(kind="ndarray", dims={"time": 6, "asset": 3}, dtype="float64"),
-            {"time": 6},
+            TypeDesc(
+                kind="xarray.DataArray",
+                dims=(
+                    ("time", 6, None),
+                    ("asset", 3, None),
+                ),
+                dtype="float64",
+            ),
+            (("time", 6, None),),
         ),
         (
             lambda da: __import__("xarray").cov(
@@ -51,8 +58,8 @@ def test_paired_recipes_present(concept: str, expected_ids: list[str]) -> None:
                 da.rolling(time=3).construct("window"),
                 dim="window",
             ),
-            TypeDesc(kind="ndarray", dims={"time": 6}, dtype="float64"),
-            {"time": 6},
+            TypeDesc(kind="xarray.DataArray", dims=(("time", 6, None),), dtype="float64"),
+            (("time", 6, None),),
         ),
         (
             lambda da: (
@@ -60,16 +67,21 @@ def test_paired_recipes_present(concept: str, expected_ids: list[str]) -> None:
                 .rename(asset="scenario")
                 .assign_coords(scenario=["base", "alt"])
             ),
-            TypeDesc(kind="ndarray", dims={"time": 5, "asset": 3}, dtype="float64"),
-            {"time": 5, "scenario": 2},
+            TypeDesc(
+                kind="xarray.DataArray",
+                dims=(
+                    ("time", 5, None),
+                    ("asset", 3, None),
+                ),
+                dtype="float64",
+            ),
+            (("time", 5, None), ("scenario", 2, None)),
         ),
     ],
 )
-def test_infer_by_execution_xarray_showcase(
-    fn, input_type: TypeDesc, expected_dims: dict[str, int]
-) -> None:
+def test_infer_by_execution_xarray_showcase(fn, input_type: TypeDesc, expected_dims: tuple) -> None:
     result = infer_by_execution(fn, input_type)
-    assert result.kind == "ndarray"
+    assert result.kind == "xarray.DataArray"
     assert result.dims == expected_dims
 
 
@@ -89,13 +101,16 @@ def test_infer_by_execution_xarray_showcase(
                 .sum()
             ),
             TypeDesc(
-                kind="dataframe",
-                columns=["ret"],
-                dtypes={"ret": "float64"},
-                index={"time": 4, "asset": 3},
+                kind="pandas.DataFrame",
+                columns=("ret",),
+                dtypes=(("ret", "float64"),),
+                index=(
+                    ("time", 4, None),
+                    ("asset", 3, None),
+                ),
             ),
-            "series",
-            {"time": 4},
+            "pandas.Series",
+            (("time", 4, None),),
         ),
         (
             lambda df: (
@@ -105,13 +120,22 @@ def test_infer_by_execution_xarray_showcase(
                 .to_frame("beta")
             ),
             TypeDesc(
-                kind="dataframe",
-                columns=["ret", "mkt"],
-                dtypes={"ret": "float64", "mkt": "float64"},
-                index={"time": 5, "asset": 3},
+                kind="pandas.DataFrame",
+                columns=(
+                    "ret",
+                    "mkt",
+                ),
+                dtypes=(
+                    ("ret", "float64"),
+                    ("mkt", "float64"),
+                ),
+                index=(
+                    ("time", 5, None),
+                    ("asset", 3, None),
+                ),
             ),
-            "dataframe",
-            {"time": 5, "asset": 3},
+            "pandas.DataFrame",
+            (("time", 5, None), ("asset", 3, None)),
         ),
     ],
 )
@@ -136,8 +160,22 @@ def test_infer_by_execution_ridge_exposures(alpha: float) -> None:
         beta = np.linalg.solve(x.T @ x + alpha * np.eye(x.shape[1]), x.T @ y)
         return xr.DataArray(beta, dims=("factor", "asset"))
 
-    factors_t = TypeDesc(kind="ndarray", dims={"time": 6, "factor": 2}, dtype="float64")
-    returns_t = TypeDesc(kind="ndarray", dims={"time": 6, "asset": 3}, dtype="float64")
+    factors_t = TypeDesc(
+        kind="xarray.DataArray",
+        dims=(
+            ("time", 6, None),
+            ("factor", 2, None),
+        ),
+        dtype="float64",
+    )
+    returns_t = TypeDesc(
+        kind="xarray.DataArray",
+        dims=(
+            ("time", 6, None),
+            ("asset", 3, None),
+        ),
+        dtype="float64",
+    )
     result = infer_by_execution(ridge_xarray, factors_t, returns_t)
-    assert result.kind == "ndarray"
-    assert result.dims == {"factor": 2, "asset": 3}
+    assert result.kind == "xarray.DataArray"
+    assert result.dims == (("factor", 2, None), ("asset", 3, None))

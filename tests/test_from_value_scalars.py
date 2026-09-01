@@ -97,13 +97,13 @@ class TestFromValueNumpyArrays:
     @pytest.mark.parametrize(
         "shape,dtype_str,expected_dims",
         [
-            ((10,), "float64", {"dim0": 10}),
-            ((5, 3), "float32", {"dim0": 5, "dim1": 3}),
-            ((2, 3, 4), "int64", {"dim0": 2, "dim1": 3, "dim2": 4}),
+            ((10,), "float64", (("dim0", 10, None),)),
+            ((5, 3), "float32", (("dim0", 5, None), ("dim1", 3, None))),
+            ((2, 3, 4), "int64", (("dim0", 2, None), ("dim1", 3, None), ("dim2", 4, None))),
         ],
     )
     def test_from_value_ndarray_shapes(
-        self, shape: tuple, dtype_str: str, expected_dims: dict
+        self, shape: tuple, dtype_str: str, expected_dims: tuple
     ) -> None:
         """from_value handles numpy arrays with various shapes."""
         import numpy as np
@@ -111,7 +111,7 @@ class TestFromValueNumpyArrays:
         arr = np.zeros(shape, dtype=dtype_str)
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == dtype_str
         assert result.dims == expected_dims
 
@@ -141,7 +141,7 @@ class TestFromValueNumpyArrays:
         arr = np.zeros((3,), dtype=dtype_str)
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == dtype_str
 
     def test_from_value_0d_array(self) -> None:
@@ -152,9 +152,9 @@ class TestFromValueNumpyArrays:
         assert arr.ndim == 0
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
-        assert result.dims == {}  # No dimensions for 0-d array
+        assert result.dims == ()  # No dimensions for 0-d array
 
     def test_from_value_empty_array(self) -> None:
         """from_value handles empty numpy arrays."""
@@ -163,9 +163,9 @@ class TestFromValueNumpyArrays:
         arr = np.array([], dtype="float64")
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
-        assert result.dims == {"dim0": 0}
+        assert result.dims == (("dim0", 0, None),)
 
     def test_from_value_empty_2d_array(self) -> None:
         """from_value handles empty 2D numpy arrays."""
@@ -174,9 +174,22 @@ class TestFromValueNumpyArrays:
         arr = np.zeros((0, 5), dtype="int32")
         result = TypeDesc.from_value(arr)
 
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "int32"
-        assert result.dims == {"dim0": 0, "dim1": 5}
+        assert result.dims == (("dim0", 0, None), ("dim1", 5, None))
+
+    def test_numpy_adapter_invalid_value_and_sample_shapes(self) -> None:
+        import numpy as np
+
+        from typetrace.adapters.numpy import from_numpy, make_numpy_sample
+        from typetrace.core import Symbol, TypeDesc
+
+        with pytest.raises(TypeError, match="Expected numpy"):
+            from_numpy(object())
+        assert make_numpy_sample(TypeDesc("numpy.ndarray", shape=(2, Symbol("N")))).shape == (2, 0)
+        assert make_numpy_sample(TypeDesc("numpy.ndarray", dtype="float32")).shape == ()
+        assert make_numpy_sample(TypeDesc("numpy.ndarray", dims=(("x", 2, None),))).shape == (2,)
+        assert isinstance(make_numpy_sample(TypeDesc("numpy.ndarray")), np.ndarray)
 
 
 @numpy_required

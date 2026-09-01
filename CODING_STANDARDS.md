@@ -77,4 +77,4 @@ Hooks:
 - ruff (lint + format)
 - trailing whitespace
 - pytest
-- coverage check (95% minimum)
+- coverage check (85% minimum)

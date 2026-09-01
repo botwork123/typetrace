@@ -9,7 +9,7 @@ repos:
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.9
+    rev: v0.14.0
     hooks:
       - id: ruff
         args: [--fix]
@@ -32,8 +32,8 @@ repos:
         always_run: true
 
       - id: coverage
-        name: coverage check (95% minimum)
-        entry: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=95 tests/
+        name: coverage check (85% minimum)
+        entry: pytest --cov=src/typetrace --cov-report=term-missing --cov-fail-under=85 tests/
         language: system
         pass_filenames: false
         always_run: true

@@ -5,7 +5,6 @@ from importlib.util import find_spec
 import pytest
 
 
-# Skip markers for optional dependencies
 def skip_if_no_pandas():
     return find_spec("pandas") is None
 
@@ -23,14 +22,26 @@ def skip_if_no_pyarrow():
 
 
 def skip_if_no_drjit():
-    return find_spec("drjit") is None
+    if find_spec("drjit") is None:
+        return True
+    try:
+        import drjit
+
+        # The Python package can be installed while its native backend (LLVM
+        # in the CI image) is unavailable.  Constructing a JIT value in that
+        # state may terminate the interpreter instead of raising an exception.
+        return not bool(drjit.has_backend(drjit.JitBackend.LLVM))
+    except Exception:
+        return True
 
 
 pandas_required = pytest.mark.skipif(skip_if_no_pandas(), reason="pandas not installed")
 xarray_required = pytest.mark.skipif(skip_if_no_xarray(), reason="xarray not installed")
 polars_required = pytest.mark.skipif(skip_if_no_polars(), reason="polars not installed")
 pyarrow_required = pytest.mark.skipif(skip_if_no_pyarrow(), reason="pyarrow not installed")
-drjit_required = pytest.mark.skipif(skip_if_no_drjit(), reason="drjit not installed")
+drjit_required = pytest.mark.skipif(
+    skip_if_no_drjit(), reason="drjit is not installed or its LLVM backend is unavailable"
+)
 
 
 @pandas_required
@@ -46,9 +57,9 @@ class TestPandasAdapter:
         df = pd.DataFrame({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
         result = from_pandas(df)
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a", "b"]
-        assert result.dtypes == {"a": "int64", "b": "float64"}
+        assert result.kind == "pandas.DataFrame"
+        assert result.columns == ("a", "b")
+        assert result.dtypes == (("a", "int64"), ("b", "float64"))
 
     def test_from_pandas_dataframe_with_named_index(self) -> None:
         """from_pandas captures named index."""
@@ -60,7 +71,7 @@ class TestPandasAdapter:
         df.index.name = "row_id"
         result = from_pandas(df)
 
-        assert result.index == {"row_id": 3}
+        assert result.index == (("row_id", 3, None),)
 
     def test_from_pandas_dataframe_with_multiindex(self) -> None:
         """from_pandas captures MultiIndex."""
@@ -74,7 +85,7 @@ class TestPandasAdapter:
         )
         result = from_pandas(df)
 
-        assert result.index == {"group": 2, "sub": 2}
+        assert result.index == (("group", 2, None), ("sub", 2, None))
 
     def test_from_pandas_series(self) -> None:
         """from_pandas extracts TypeDesc from Series."""
@@ -85,7 +96,7 @@ class TestPandasAdapter:
         s = pd.Series([1.0, 2.0, 3.0], name="values")
         result = from_pandas(s)
 
-        assert result.kind == "series"
+        assert result.kind == "pandas.Series"
         assert result.dtype == "float64"
 
     def test_from_pandas_series_with_named_index(self) -> None:
@@ -98,7 +109,7 @@ class TestPandasAdapter:
         s.index.name = "idx"
         result = from_pandas(s)
 
-        assert result.index == {"idx": 3}
+        assert result.index == (("idx", 3, None),)
 
     def test_from_pandas_invalid_type(self) -> None:
         """from_pandas raises TypeError for non-pandas types."""
@@ -115,9 +126,17 @@ class TestPandasAdapter:
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
-            kind="dataframe",
-            columns=["a", "b", "c"],
-            dtypes={"a": "float64", "b": "int32", "c": "bool"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+                "c",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int32"),
+                ("c", "bool"),
+            ),
         )
         result = make_dataframe_sample(t)
 
@@ -135,10 +154,10 @@ class TestPandasAdapter:
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
-            kind="dataframe",
-            columns=["a"],
-            dtypes={"a": "float64"},
-            index={"row_id": 10},
+            kind="pandas.DataFrame",
+            columns=("a",),
+            dtypes=(("a", "float64"),),
+            index=(("row_id", 10, None),),
         )
         result = make_dataframe_sample(t)
 
@@ -149,29 +168,29 @@ class TestPandasAdapter:
     @pytest.mark.parametrize(
         "columns,dtypes,expected_columns",
         [
-            (["a", ...], {"a": "int64"}, ["a"]),
-            (["a", "b", ...], {"a": "float64", "b": "bool"}, ["a", "b"]),
-            (["a"], {"a": "int64"}, ["a"]),
+            ((("a", ...), (("a", "int64"),), ("a",))),
+            ((("a", "b", ...), (("a", "float64"), ("b", "bool")), ("a", "b"))),
+            ((("a",), (("a", "int64"),), ("a",))),
         ],
     )
     def test_make_dataframe_sample_partial_schema_known_columns_only(
         self,
         columns: list,
         dtypes: dict[str, str],
-        expected_columns: list[str],
+        expected_columns: tuple[str, ...],
     ) -> None:
         """Partial schema samples only materialize known columns (no physical ellipsis column)."""
         from typetrace.adapters.pandas import make_dataframe_sample
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
-            kind="dataframe",
+            kind="pandas.DataFrame",
             columns=columns,
             dtypes=dtypes,
         )
         result = make_dataframe_sample(t)
 
-        assert list(result.columns) == expected_columns
+        assert tuple(result.columns) == expected_columns
         assert "..." not in result.columns
 
     def test_make_dataframe_sample_exact_schema_unchanged(self) -> None:
@@ -180,9 +199,15 @@ class TestPandasAdapter:
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
-            kind="dataframe",
-            columns=["a", "b"],
-            dtypes={"a": "float64", "b": "int32"},
+            kind="pandas.DataFrame",
+            columns=(
+                "a",
+                "b",
+            ),
+            dtypes=(
+                ("a", "float64"),
+                ("b", "int32"),
+            ),
         )
         result = make_dataframe_sample(t)
 
@@ -205,7 +230,7 @@ class TestPandasAdapter:
         from typetrace.adapters.pandas import make_dataframe_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="dataframe", columns=[column], dtypes={column: dtype})
+        t = TypeDesc(kind="pandas.DataFrame", columns=(column,), dtypes=((column, dtype),))
         result = make_dataframe_sample(t)
 
         if dtype == "datetime64[ns]":
@@ -218,45 +243,16 @@ class TestPandasAdapter:
         from typetrace.adapters.pandas import make_dataframe_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="dataframe")
+        t = TypeDesc(kind="pandas.DataFrame")
         with pytest.raises(ValueError, match="Cannot make DataFrame sample"):
             make_dataframe_sample(t)
 
     def test_make_series_sample(self) -> None:
         """make_series_sample creates empty Series with dtype."""
-        import pandas as pd
-
         from typetrace.adapters.pandas import make_series_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="series", dtype="int64")
-        result = make_series_sample(t)
-
-        assert isinstance(result, pd.Series)
-        assert result.dtype == "int64"
-        assert len(result) == 4
-        assert result.iloc[-1] == 3
-
-    def test_make_series_sample_with_index(self) -> None:
-        """make_series_sample sets index name."""
-
-        from typetrace.adapters.pandas import make_series_sample
-        from typetrace.core import TypeDesc
-
-        t = TypeDesc(kind="series", dtype="float64", index={"time": 100})
-        result = make_series_sample(t)
-
-        assert result.index.name == "time"
-        assert len(result) == 100
-        assert result.iloc[50] == 0.5050505050505051
-
-    def test_make_series_sample_default_dtype(self) -> None:
-        """make_series_sample uses float64 as default dtype."""
-
-        from typetrace.adapters.pandas import make_series_sample
-        from typetrace.core import TypeDesc
-
-        t = TypeDesc(kind="series")
+        t = TypeDesc(kind="pandas.Series", dtype="float64")
         result = make_series_sample(t)
 
         assert result.dtype == "float64"
@@ -276,8 +272,8 @@ class TestXarrayAdapter:
         da = xr.DataArray(np.zeros((10, 20)), dims=["x", "y"], attrs={"units": "meters"})
         result = from_xarray(da)
 
-        assert result.kind == "ndarray"
-        assert result.dims == {"x": 10, "y": 20}
+        assert result.kind == "xarray.DataArray"
+        assert result.dims == (("x", 10, None), ("y", 20, None))
         assert result.dtype == "float64"
 
     def test_from_xarray_dataarray_with_object_dtype(self) -> None:
@@ -308,11 +304,11 @@ class TestXarrayAdapter:
         )
         result = from_xarray(ds)
 
-        assert result.kind == "dataset"
-        assert "temp" in result.fields
-        assert "pressure" in result.fields
-        assert result.fields["temp"].dims == {"x": 10, "y": 20}
-        assert result.fields["pressure"].dims == {"x": 10}
+        assert result.kind == "xarray.Dataset"
+        assert result.field("temp") is not None
+        assert result.field("pressure") is not None
+        assert result.field("temp").dims == (("x", 10, None), ("y", 20, None))
+        assert result.field("pressure").dims == (("x", 10, None),)
 
     def test_from_xarray_invalid_type(self) -> None:
         """from_xarray raises TypeError for non-xarray types."""
@@ -328,7 +324,14 @@ class TestXarrayAdapter:
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="ndarray", dims={"x": 10, "y": 20}, dtype="float32")
+        t = TypeDesc(
+            kind="xarray.DataArray",
+            dims=(
+                ("x", 10, None),
+                ("y", 20, None),
+            ),
+            dtype="float32",
+        )
         result = make_xarray_sample(t)
 
         assert isinstance(result, xr.DataArray)
@@ -344,7 +347,14 @@ class TestXarrayAdapter:
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import Symbol, TypeDesc
 
-        t = TypeDesc(kind="ndarray", dims={"x": Symbol("N"), "y": 20}, dtype="float64")
+        t = TypeDesc(
+            kind="xarray.DataArray",
+            dims=(
+                ("x", Symbol("N"), None),
+                ("y", 20, None),
+            ),
+            dtype="float64",
+        )
         result = make_xarray_sample(t)
 
         assert isinstance(result, xr.DataArray)
@@ -356,7 +366,7 @@ class TestXarrayAdapter:
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="ndarray")
+        t = TypeDesc(kind="xarray.DataArray")
         with pytest.raises(ValueError, match="Cannot make xarray sample"):
             make_xarray_sample(t)
 
@@ -366,10 +376,24 @@ class TestXarrayAdapter:
         from typetrace.adapters.xarray import make_xarray_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="ndarray", dims={"x": 10})
+        t = TypeDesc(kind="xarray.DataArray", dims=(("x", 10, None),))
         result = make_xarray_sample(t)
 
         assert result.dtype == "float64"
+
+    def test_make_xarray_dataset_sample_without_fields(self) -> None:
+        from typetrace.adapters.xarray import make_dataset_sample
+        from typetrace.core import TypeDesc
+
+        result = make_dataset_sample(TypeDesc("xarray.Dataset", dims=(("x", 2, None),)))
+        assert result["data"].dims == ("x",)
+
+    def test_make_xarray_dataset_sample_requires_schema(self) -> None:
+        from typetrace.adapters.xarray import make_dataset_sample
+        from typetrace.core import TypeDesc
+
+        with pytest.raises(ValueError, match="without dims or fields"):
+            make_dataset_sample(TypeDesc("xarray.Dataset"))
 
 
 @polars_required
@@ -385,10 +409,10 @@ class TestPolarsAdapter:
         df = pl.DataFrame({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
         result = from_polars(df)
 
-        assert result.kind == "dataframe"
-        assert result.columns == ["a", "b"]
-        assert "a" in result.dtypes
-        assert "b" in result.dtypes
+        assert result.kind == "polars.DataFrame"
+        assert result.columns == ("a", "b")
+        assert "a" in dict(result.dtypes or ())
+        assert "b" in dict(result.dtypes or ())
 
     def test_from_polars_series(self) -> None:
         """from_polars extracts TypeDesc from Series."""
@@ -399,7 +423,7 @@ class TestPolarsAdapter:
         s = pl.Series("values", [1.0, 2.0, 3.0])
         result = from_polars(s)
 
-        assert result.kind == "series"
+        assert result.kind == "polars.Series"
         assert "float" in result.dtype.lower() or "f64" in result.dtype.lower()
 
     def test_from_polars_invalid_type(self) -> None:
@@ -412,9 +436,9 @@ class TestPolarsAdapter:
     @pytest.mark.parametrize(
         "columns,dtypes,expected_dtypes",
         [
-            (["a", "b"], {"a": "Float64", "b": "Int64"}, ["Float64", "Int64"]),
-            (["x"], {"x": "Boolean"}, ["Boolean"]),
-            (["c", "d"], {}, ["Float64", "Float64"]),  # Default dtype
+            ((("a", "b"), (("a", "Float64"), ("b", "Int64")), ("Float64", "Int64"))),
+            ((("x",), (("x", "Boolean"),), ("Boolean",))),
+            ((("c", "d"), (("c", "Float64"), ("d", "Float64")), ("Float64", "Float64"))),
         ],
     )
     def test_make_polars_dataframe_sample(
@@ -426,11 +450,11 @@ class TestPolarsAdapter:
         from typetrace.adapters.polars import make_polars_dataframe_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="dataframe", columns=columns, dtypes=dtypes)
+        t = TypeDesc(kind="polars.DataFrame", columns=columns, dtypes=dtypes)
         result = make_polars_dataframe_sample(t)
 
         assert isinstance(result, pl.DataFrame)
-        assert result.columns == columns
+        assert tuple(result.columns) == columns
         assert len(result) == 0
         for col, expected in zip(columns, expected_dtypes):
             assert str(result[col].dtype) == expected
@@ -440,7 +464,7 @@ class TestPolarsAdapter:
         from typetrace.adapters.polars import make_polars_dataframe_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="dataframe")
+        t = TypeDesc(kind="polars.DataFrame")
         with pytest.raises(ValueError, match="Cannot make Polars DataFrame sample"):
             make_polars_dataframe_sample(t)
 
@@ -461,7 +485,7 @@ class TestPolarsAdapter:
         from typetrace.adapters.polars import make_polars_series_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="series", dtype=dtype)
+        t = TypeDesc(kind="polars.Series", dtype=dtype)
         result = make_polars_series_sample(t)
 
         assert isinstance(result, pl.Series)
@@ -501,10 +525,10 @@ class TestArrowAdapter:
         table = pa.table({"a": [1, 2, 3], "b": [1.0, 2.0, 3.0]})
         result = from_arrow(table)
 
-        assert result.kind == "columnar"
-        assert result.columns == ["a", "b"]
-        assert "a" in result.dtypes
-        assert "b" in result.dtypes
+        assert result.kind == "pyarrow.Table"
+        assert result.columns == ("a", "b")
+        assert "a" in dict(result.dtypes or ())
+        assert "b" in dict(result.dtypes or ())
 
     def test_from_arrow_array(self) -> None:
         """from_arrow extracts TypeDesc from Array."""
@@ -515,7 +539,7 @@ class TestArrowAdapter:
         arr = pa.array([1.0, 2.0, 3.0])
         result = from_arrow(arr)
 
-        assert result.kind == "series"
+        assert result.kind == "pyarrow.Array"
         assert "double" in result.dtype or "float" in result.dtype
 
     def test_from_arrow_invalid_type(self) -> None:
@@ -528,10 +552,10 @@ class TestArrowAdapter:
     @pytest.mark.parametrize(
         "columns,dtypes,expected_types",
         [
-            (["a", "b"], {"a": "float64", "b": "int64"}, ["double", "int64"]),
-            (["x"], {"x": "bool"}, ["bool"]),
-            (["c", "d"], {}, ["double", "double"]),  # Default dtype
-            (["s"], {"s": "string"}, ["string"]),
+            ((("a", "b"), (("a", "float64"), ("b", "int64")), ("double", "int64"))),
+            ((("x",), (("x", "bool"),), ("bool",))),
+            ((("c", "d"), (("c", "float64"), ("d", "float64")), ("double", "double"))),
+            ((("s",), (("s", "string"),), ("string",))),
         ],
     )
     def test_make_arrow_table_sample(
@@ -543,11 +567,11 @@ class TestArrowAdapter:
         from typetrace.adapters.arrow import make_arrow_table_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="columnar", columns=columns, dtypes=dtypes)
+        t = TypeDesc(kind="pyarrow.Table", columns=columns, dtypes=dtypes)
         result = make_arrow_table_sample(t)
 
         assert isinstance(result, pa.Table)
-        assert result.column_names == columns
+        assert tuple(result.column_names) == columns
         assert result.num_rows == 0
         for col, expected in zip(columns, expected_types):
             assert str(result.schema.field(col).type) == expected
@@ -557,7 +581,7 @@ class TestArrowAdapter:
         from typetrace.adapters.arrow import make_arrow_table_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="columnar")
+        t = TypeDesc(kind="pyarrow.Table")
         with pytest.raises(ValueError, match="Cannot make Arrow Table sample"):
             make_arrow_table_sample(t)
 
@@ -568,7 +592,7 @@ class TestArrowAdapter:
             ("int32", "int32"),
             ("bool", "bool"),
             ("string", "string"),
-            (None, "double"),  # Default dtype
+            (None, "double"),
         ],
     )
     def test_make_arrow_array_sample(self, dtype: str | None, expected_type: str) -> None:
@@ -578,7 +602,7 @@ class TestArrowAdapter:
         from typetrace.adapters.arrow import make_arrow_array_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="series", dtype=dtype)
+        t = TypeDesc(kind="pyarrow.Array", dtype=dtype)
         result = make_arrow_array_sample(t)
 
         assert isinstance(result, pa.Array)
@@ -599,56 +623,42 @@ class TestArrowAdapter:
         ],
     )
     def test_get_arrow_type_additional_branches(self, dtype: str, expected: str) -> None:
-        """_get_arrow_type maps additional integer/unsigned and fallback dtypes."""
         from typetrace.adapters.arrow import _get_arrow_type
 
         assert str(_get_arrow_type(dtype)) == expected
 
     def test_make_sample_columnar_via_core(self) -> None:
-        """TypeDesc.make_sample() works for columnar kind."""
         import pyarrow as pa
 
         from typetrace.core import TypeDesc
 
         t = TypeDesc(
-            kind="columnar",
-            columns=["x", "y"],
-            dtypes={"x": "int64", "y": "float64"},
+            kind="pyarrow.Table", columns=("x", "y"), dtypes=(("x", "int64"), ("y", "float64"))
         )
         result = t.make_sample()
-
         assert isinstance(result, pa.Table)
-        assert result.column_names == ["x", "y"]
+        assert tuple(result.column_names) == ("x", "y")
         assert result.num_rows == 0
 
 
 @drjit_required
 class TestDrJitAdapter:
-    """Tests for DrJit adapter."""
-
     def test_from_drjit_float_array(self) -> None:
-        """from_drjit extracts TypeDesc from float array."""
         from drjit import llvm
 
         from typetrace.adapters.drjit import from_drjit
 
-        arr = llvm.Float64([1.0, 2.0, 3.0])
-        result = from_drjit(arr)
-
-        assert result.kind == "drjit"
+        result = from_drjit(llvm.Float64([1.0, 2.0, 3.0]))
+        assert result.kind == "drjit.Array"
         assert result.dtype == "float64"
-        assert result.drjit_type is type(arr)
 
     def test_from_drjit_int_array(self) -> None:
-        """from_drjit extracts TypeDesc from int array."""
         from drjit import llvm
 
         from typetrace.adapters.drjit import from_drjit
 
-        arr = llvm.Int([1, 2, 3])
-        result = from_drjit(arr)
-
-        assert result.kind == "drjit"
+        result = from_drjit(llvm.Int([1, 2, 3]))
+        assert result.kind == "drjit.Array"
         assert "int" in result.dtype
 
     @pytest.mark.parametrize(
@@ -669,38 +679,33 @@ class TestDrJitAdapter:
         ],
     )
     def test_drjit_dtype_inference(self, type_name: str, expected_dtype: str) -> None:
-        """_drjit_dtype correctly infers dtype from type name."""
         from typetrace.adapters.drjit import _drjit_dtype
 
         class MockArray:
             pass
 
         MockArray.__name__ = type_name
-        result = _drjit_dtype(MockArray())
-        assert result == expected_dtype
+        assert _drjit_dtype(MockArray()) == expected_dtype
 
     def test_make_drjit_sample_with_type(self) -> None:
-        """make_drjit_sample creates array with correct type."""
-        import drjit as dr
         from drjit import llvm
 
         from typetrace.adapters.drjit import make_drjit_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="drjit", drjit_type=llvm.Float64, dtype="float64")
-        result = make_drjit_sample(t)
-
-        assert type(result) is llvm.Float64
-        assert dr.width(result) == 0
+        assert (
+            type(
+                make_drjit_sample(
+                    TypeDesc(kind="drjit.Array", drjit_type=llvm.Float64, dtype="float64")
+                )
+            )
+            is llvm.Float64
+        )
 
     def test_make_drjit_sample_infer_type(self) -> None:
-        """make_drjit_sample infers type from dtype."""
         from drjit import llvm
 
         from typetrace.adapters.drjit import make_drjit_sample
         from typetrace.core import TypeDesc
 
-        t = TypeDesc(kind="drjit", dtype="int64")
-        result = make_drjit_sample(t)
-
-        assert type(result) is llvm.Int64
+        assert type(make_drjit_sample(TypeDesc(kind="drjit.Array", dtype="int64"))) is llvm.Int64

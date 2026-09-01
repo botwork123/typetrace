@@ -241,3 +241,29 @@ class TestPassthrough:
         result = concrete_transform(pd.DataFrame, "nonexistent_method")
 
         assert result == pd.DataFrame
+
+
+def test_concrete_transform_edge_matrix() -> None:
+    import numpy as np
+
+    assert concrete_transform((int, int), "eq") is bool
+    assert concrete_transform((int, float), "truediv") is float
+    assert concrete_transform((int, int), "floordiv") is int
+    assert concrete_transform((int, float), "floordiv") is float
+    assert concrete_transform((str, int), "floordiv") is str
+    assert concrete_transform(bool, "invert") is int
+    assert concrete_transform(bool, "not") is bool
+    assert concrete_transform(np.ndarray, "sum") is np.ndarray
+    assert concrete_transform(np.ndarray, "neg") is np.ndarray
+    assert concrete_transform((np.ndarray, float), "add") is np.ndarray
+
+
+def test_concrete_transform_dask_and_pandas_reductions() -> None:
+    import pandas as pd
+
+    assert concrete_transform(pd.DataFrame, "sum") is pd.Series
+    assert concrete_transform(pd.Series, "sum") is None
+    fake_frame = type("DataFrame", (), {"__module__": "dask.dataframe"})
+    fake_series = type("Series", (), {"__module__": "dask.dataframe"})
+    assert concrete_transform(fake_frame, "compute") is pd.DataFrame
+    assert concrete_transform(fake_series, "head") is pd.Series

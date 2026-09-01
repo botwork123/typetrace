@@ -7,7 +7,7 @@ Most calcs use one of these patterns, so we avoid duplicating logic.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from typetrace.core import Dims, DimValue, Symbol
 
@@ -19,6 +19,24 @@ class DimMismatch(Exception):
     """Raised when dimensions don't match as required."""
 
     pass
+
+
+def _dim_entries(
+    dims: Dims | None,
+) -> list[tuple[str, DimValue, tuple[Any, ...] | None]]:
+    if dims is None:
+        return []
+    result = []
+    for entry in dims:
+        if len(entry) == 2:
+            result.append((entry[0], entry[1], None))
+        else:
+            result.append((entry[0], entry[1], entry[2]))
+    return result
+
+
+def _dims_tuple(entries: list[tuple[str, DimValue, tuple[Any, ...] | None]]) -> Dims:
+    return tuple(entries)
 
 
 def unify(d1: Dims | None, d2: Dims | None) -> Dims:
@@ -38,19 +56,21 @@ def unify(d1: Dims | None, d2: Dims | None) -> Dims:
     Raises:
         DimMismatch: If same-named dims have different sizes
     """
-    if d1 is None:
-        return d2 or {}
-    if d2 is None:
-        return d1
-
-    result = dict(d1)
-    for name, size in d2.items():
-        if name in result:
-            if result[name] != size:
-                raise DimMismatch(f"Dimension {name!r}: {result[name]} vs {size}")
+    result = _dim_entries(d1)
+    positions = {name: index for index, (name, _, _) in enumerate(result)}
+    for name, size, labels in _dim_entries(d2):
+        if name in positions:
+            index = positions[name]
+            old_name, old_size, old_labels = result[index]
+            if old_size != size or (
+                old_labels is not None and labels is not None and old_labels != labels
+            ):
+                raise DimMismatch(f"Dimension {name!r}: {old_size} vs {size}")
+            result[index] = (old_name, old_size, old_labels if old_labels is not None else labels)
         else:
-            result[name] = size
-    return result
+            positions[name] = len(result)
+            result.append((name, size, labels))
+    return _dims_tuple(result)
 
 
 def broadcast(d1: Dims | None, d2: Dims | None) -> Dims:
@@ -67,12 +87,7 @@ def broadcast(d1: Dims | None, d2: Dims | None) -> Dims:
     Returns:
         Union of dimensions (all dims from both)
     """
-    if d1 is None:
-        return d2 or {}
-    if d2 is None:
-        return d1
-
-    return {**d1, **d2}
+    return unify(d1, d2)
 
 
 def add_dim(d: Dims | None, name: str, size: DimValue) -> Dims:
@@ -89,9 +104,11 @@ def add_dim(d: Dims | None, name: str, size: DimValue) -> Dims:
     Returns:
         Dimensions with new dim added
     """
-    result = dict(d) if d else {}
-    result[name] = size
-    return result
+    result = _dim_entries(d)
+    if any(existing == name for existing, _, _ in result):
+        raise DimMismatch(f"Dimension {name!r} already exists")
+    result.append((name, size, None))
+    return _dims_tuple(result)
 
 
 def reduce_dim(d: Dims | None, name: str) -> Dims:
@@ -107,9 +124,9 @@ def reduce_dim(d: Dims | None, name: str) -> Dims:
     Returns:
         Dimensions with specified dim removed
     """
-    if d is None:
-        return {}
-    return {k: v for k, v in d.items() if k != name}
+    return _dims_tuple(
+        [(key, size, labels) for key, size, labels in _dim_entries(d) if key != name]
+    )
 
 
 def promote_dtype(dtype1: str | None, dtype2: str | None) -> str | None:
@@ -158,15 +175,15 @@ def bind_symbols(d: Dims | None, bindings: dict[str, int]) -> Dims:
         Dimensions with symbols replaced by concrete values where bound
     """
     if d is None:
-        return {}
+        return ()
 
-    result: Dims = {}
-    for name, size in d.items():
+    result: list[tuple[str, DimValue, tuple[Any, ...] | None]] = []
+    for name, size, labels in _dim_entries(d):
         if isinstance(size, Symbol) and size.name in bindings:
-            result[name] = bindings[size.name]
+            result.append((name, bindings[size.name], labels))
         else:
-            result[name] = size
-    return result
+            result.append((name, size, labels))
+    return _dims_tuple(result)
 
 
 # =============================================================================
@@ -319,13 +336,9 @@ def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
     Returns:
         New TypeDesc with broadcasted dims and transformed dtype
     """
-    from typetrace.core import TypeDesc as TD  # noqa: PLC0415
-
     new_dims = broadcast(left.dims, right.dims)
     new_dtype = binary_result_dtype(left.dtype, right.dtype, operation)
 
-    return TD(
-        kind=left.kind,
-        dims=new_dims,
-        dtype=new_dtype,
-    )
+    from dataclasses import replace
+
+    return replace(left, dims=new_dims, dtype=new_dtype)

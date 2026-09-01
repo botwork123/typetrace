@@ -23,27 +23,31 @@ def from_pandas(value: Any) -> TypeDesc:
     import pandas as pd
 
     if isinstance(value, pd.DataFrame):
-        columns = list(value.columns)
-        dtypes = {col: str(dtype) for col, dtype in value.dtypes.items()}
+        columns = tuple(value.columns)
+        dtypes = tuple((col, str(dtype)) for col, dtype in value.dtypes.items())
 
         index: Dims | None = None
         if value.index.name is not None or isinstance(value.index, pd.MultiIndex):
             if isinstance(value.index, pd.MultiIndex):
-                index = {
-                    str(name or f"level_{i}"): int(value.index.get_level_values(i).nunique())
+                index = tuple(
+                    (
+                        str(name or f"level_{i}"),
+                        int(value.index.get_level_values(i).nunique()),
+                        None,
+                    )
                     for i, name in enumerate(value.index.names)
-                }
+                )
             else:
-                index = {value.index.name or "index": len(value.index)}
+                index = ((value.index.name or "index", len(value.index), None),)
 
-        return TypeDesc(kind="dataframe", columns=columns, dtypes=dtypes, index=index)
+        return TypeDesc(kind="pandas.DataFrame", columns=columns, dtypes=dtypes, index=index)
     elif isinstance(value, pd.Series):
         dtype = str(value.dtype)
         index = None
         if value.index.name is not None:
-            index = {value.index.name: len(value.index)}
+            index = ((value.index.name, len(value.index), None),)
 
-        return TypeDesc(kind="series", dtype=dtype, index=index)
+        return TypeDesc(kind="pandas.Series", dtype=dtype, index=index)
     else:
         raise TypeError(f"Expected pandas type, got {type(value)}")
 
@@ -87,10 +91,11 @@ def _build_index(index_desc: Dims | None, rows: int) -> Any:
 
     if not index_desc:
         return pd.RangeIndex(rows)
-    names = list(index_desc.keys())
+    entries = list(index_desc)
+    names = [name for name, _, _ in entries]
     sizes = [
-        max(int(v) if isinstance(v, int) else _default_sample_size(), 1)
-        for v in index_desc.values()
+        max(int(size) if isinstance(size, int) else _default_sample_size(), 1)
+        for _, size, _ in entries
     ]
     levels = [_index_values(name, size) for name, size in zip(names, sizes)]
     return (
@@ -110,7 +115,7 @@ def make_dataframe_sample(type_desc: TypeDesc) -> Any:
 
     index = _build_index(type_desc.index, _default_sample_size())
     row_count = len(index)
-    dtypes = type_desc.dtypes or {}
+    dtypes = dict(type_desc.dtypes or ())
     data = {col: _series_values(dtypes.get(col, "float64"), row_count) for col in known_columns}
     return pd.DataFrame(data, index=index)
 

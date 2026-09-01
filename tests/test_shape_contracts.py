@@ -9,14 +9,14 @@ from typetrace.core import TypeDesc, requires_shape_contract
     "kind,expected",
     [
         ("scalar", False),
-        ("class", False),
+        ("opaque", False),
         ("recursive", False),
-        ("ndarray", True),
-        ("dataset", True),
-        ("dataframe", True),
-        ("series", True),
-        ("columnar", True),
-        ("drjit", True),
+        ("numpy.ndarray", True),
+        ("xarray.Dataset", True),
+        ("pandas.DataFrame", True),
+        ("pandas.Series", True),
+        ("pyarrow.Table", True),
+        ("drjit.Array", True),
     ],
 )
 def test_requires_shape_contract_by_kind(kind: str, expected: bool) -> None:

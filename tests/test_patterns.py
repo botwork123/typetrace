@@ -25,21 +25,25 @@ class TestUnify:
         "d1,d2,expected",
         [
             # Same dims
-            ({"x": 10}, {"x": 10}, {"x": 10}),
+            ((("x", 10, None),), (("x", 10, None),), (("x", 10, None),)),
             # Disjoint dims - both included
-            ({"x": 10}, {"y": 20}, {"x": 10, "y": 20}),
+            ((("x", 10, None),), (("y", 20, None),), (("x", 10, None), ("y", 20, None))),
             # Empty cases
-            ({}, {"x": 10}, {"x": 10}),
-            ({"x": 10}, {}, {"x": 10}),
-            ({}, {}, {}),
+            ((), (("x", 10, None),), (("x", 10, None),)),
+            ((("x", 10, None),), (), (("x", 10, None),)),
+            ((), (), ()),
             # None cases
-            (None, {"x": 10}, {"x": 10}),
-            ({"x": 10}, None, {"x": 10}),
-            (None, None, {}),
+            (None, (("x", 10, None),), (("x", 10, None),)),
+            ((("x", 10, None),), None, (("x", 10, None),)),
+            (None, None, ()),
             # Multiple dims
-            ({"x": 10, "y": 20}, {"y": 20, "z": 30}, {"x": 10, "y": 20, "z": 30}),
+            (
+                (("x", 10, None), ("y", 20, None)),
+                (("y", 20, None), ("z", 30, None)),
+                (("x", 10, None), ("y", 20, None), ("z", 30, None)),
+            ),
             # Symbolic dims
-            ({"x": Symbol("N")}, {"x": Symbol("N")}, {"x": Symbol("N")}),
+            ((("x", Symbol("N"), None),), (("x", Symbol("N"), None),), (("x", Symbol("N"), None),)),
         ],
     )
     def test_unify_success(self, d1, d2, expected):
@@ -49,8 +53,8 @@ class TestUnify:
     @pytest.mark.parametrize(
         "d1,d2",
         [
-            ({"x": 10}, {"x": 20}),  # Same name, different size
-            ({"x": Symbol("N")}, {"x": 10}),  # Symbol vs int
+            ((("x", 10, None),), (("x", 20, None),)),  # Same name, different size
+            ((("x", Symbol("N"), None),), (("x", 10, None),)),  # Symbol vs int
         ],
     )
     def test_unify_mismatch(self, d1, d2):
@@ -65,12 +69,12 @@ class TestBroadcast:
     @pytest.mark.parametrize(
         "d1,d2,expected",
         [
-            ({"x": 10}, {"y": 20}, {"x": 10, "y": 20}),
-            ({"x": 10}, {"x": 10}, {"x": 10}),  # Same dim, second wins
-            ({}, {"x": 10}, {"x": 10}),
-            (None, {"x": 10}, {"x": 10}),
-            ({"x": 10}, None, {"x": 10}),
-            (None, None, {}),
+            ((("x", 10, None),), (("y", 20, None),), (("x", 10, None), ("y", 20, None))),
+            ((("x", 10, None),), (("x", 10, None),), (("x", 10, None),)),  # Same dim, second wins
+            ((), (("x", 10, None),), (("x", 10, None),)),
+            (None, (("x", 10, None),), (("x", 10, None),)),
+            ((("x", 10, None),), None, (("x", 10, None),)),
+            (None, None, ()),
         ],
     )
     def test_broadcast(self, d1, d2, expected):
@@ -84,10 +88,10 @@ class TestAddDim:
     @pytest.mark.parametrize(
         "d,name,size,expected",
         [
-            ({"x": 10}, "y", 20, {"x": 10, "y": 20}),
-            ({}, "x", 10, {"x": 10}),
-            (None, "x", 10, {"x": 10}),
-            ({"x": 10}, "y", Symbol("M"), {"x": 10, "y": Symbol("M")}),
+            ((("x", 10, None),), "y", 20, (("x", 10, None), ("y", 20, None))),
+            ((), "x", 10, (("x", 10, None),)),
+            (None, "x", 10, (("x", 10, None),)),
+            ((("x", 10, None),), "y", Symbol("M"), (("x", 10, None), ("y", Symbol("M"), None))),
         ],
     )
     def test_add_dim(self, d, name, size, expected):
@@ -101,11 +105,11 @@ class TestReduceDim:
     @pytest.mark.parametrize(
         "d,name,expected",
         [
-            ({"x": 10, "y": 20}, "x", {"y": 20}),
-            ({"x": 10}, "x", {}),
-            ({"x": 10}, "y", {"x": 10}),  # Non-existent dim
-            ({}, "x", {}),
-            (None, "x", {}),
+            ((("x", 10, None), ("y", 20, None)), "x", (("y", 20, None),)),
+            ((("x", 10, None),), "x", ()),
+            ((("x", 10, None),), "y", (("x", 10, None),)),  # Non-existent dim
+            ((), "x", ()),
+            (None, "x", ()),
         ],
     )
     def test_reduce_dim(self, d, name, expected):
@@ -142,14 +146,18 @@ class TestBindSymbols:
         "dims,bindings,expected",
         [
             # Bind symbolic to concrete
-            ({"x": Symbol("N")}, {"N": 100}, {"x": 100}),
+            ((("x", Symbol("N"), None),), {"N": 100}, (("x", 100, None),)),
             # Mixed symbolic and concrete
-            ({"x": Symbol("N"), "y": 20}, {"N": 100}, {"x": 100, "y": 20}),
+            (
+                (("x", Symbol("N"), None), ("y", 20, None)),
+                {"N": 100},
+                (("x", 100, None), ("y", 20, None)),
+            ),
             # Unbound symbol stays
-            ({"x": Symbol("N")}, {"M": 100}, {"x": Symbol("N")}),
+            ((("x", Symbol("N"), None),), {"M": 100}, (("x", Symbol("N"), None),)),
             # Empty cases
-            ({}, {"N": 100}, {}),
-            (None, {"N": 100}, {}),
+            ((), {"N": 100}, ()),
+            (None, {"N": 100}, ()),
         ],
     )
     def test_bind_symbols(self, dims, bindings, expected):
@@ -250,13 +258,13 @@ class TestApplyUnary:
         "kind,dims,dtype,operation,expected_dtype",
         [
             # Negation preserves everything
-            ("DataArray", {"x": 10}, "float64", "neg", "float64"),
+            ("xarray.DataArray", (("x", 10, None),), "float64", "neg", "float64"),
             # Not returns bool
-            ("DataArray", {"x": 10, "y": 5}, "float64", "not", "bool"),
+            ("xarray.DataArray", (("x", 10, None), ("y", 5, None)), "float64", "not", "bool"),
             # Abs on complex
-            ("ndarray", {"x": 10}, "complex128", "abs", "float64"),
+            ("numpy.ndarray", (("x", 10, None),), "complex128", "abs", "float64"),
             # Sign returns int
-            ("DataArray", {"x": 10}, "float64", "sign", "int64"),
+            ("xarray.DataArray", (("x", 10, None),), "float64", "sign", "int64"),
         ],
     )
     def test_apply_unary(self, kind, dims, dtype, operation, expected_dtype):
@@ -276,13 +284,45 @@ class TestApplyBinary:
         "left_dims,right_dims,left_dtype,right_dtype,operation,expected_dims,expected_dtype",
         [
             # Add with broadcasting
-            ({"x": 10}, {"y": 5}, "float64", "float64", "add", {"x": 10, "y": 5}, "float64"),
+            (
+                (("x", 10, None),),
+                (("y", 5, None),),
+                "float64",
+                "float64",
+                "add",
+                (("x", 10, None), ("y", 5, None)),
+                "float64",
+            ),
             # Comparison returns bool
-            ({"x": 10}, {"x": 10}, "float64", "int32", "eq", {"x": 10}, "bool"),
+            (
+                (("x", 10, None),),
+                (("x", 10, None),),
+                "float64",
+                "int32",
+                "eq",
+                (("x", 10, None),),
+                "bool",
+            ),
             # Division returns float
-            ({"x": 10}, {"x": 10}, "int32", "int32", "truediv", {"x": 10}, "float64"),
+            (
+                (("x", 10, None),),
+                (("x", 10, None),),
+                "int32",
+                "int32",
+                "truediv",
+                (("x", 10, None),),
+                "float64",
+            ),
             # Promotion
-            ({"x": 10}, {"y": 5}, "float32", "float64", "mul", {"x": 10, "y": 5}, "float64"),
+            (
+                (("x", 10, None),),
+                (("y", 5, None),),
+                "float32",
+                "float64",
+                "mul",
+                (("x", 10, None), ("y", 5, None)),
+                "float64",
+            ),
         ],
     )
     def test_apply_binary(
@@ -296,18 +336,18 @@ class TestApplyBinary:
         expected_dtype,
     ):
         """apply_binary transforms full TypeDesc correctly."""
-        left = TypeDesc(kind="DataArray", dims=left_dims, dtype=left_dtype)
-        right = TypeDesc(kind="DataArray", dims=right_dims, dtype=right_dtype)
+        left = TypeDesc(kind="xarray.DataArray", dims=left_dims, dtype=left_dtype)
+        right = TypeDesc(kind="xarray.DataArray", dims=right_dims, dtype=right_dtype)
         result = apply_binary(left, right, operation)
 
-        assert result.kind == "DataArray"  # Kind follows left
+        assert result.kind == "xarray.DataArray"  # Kind follows left
         assert result.dims == expected_dims
         assert result.dtype == expected_dtype
 
     def test_apply_binary_kind_from_left(self):
         """apply_binary takes kind from left operand."""
-        left = TypeDesc(kind="DataArray", dims={"x": 10}, dtype="float64")
-        right = TypeDesc(kind="ndarray", dims={"x": 10}, dtype="float64")
+        left = TypeDesc(kind="xarray.DataArray", dims=(("x", 10, None),), dtype="float64")
+        right = TypeDesc(kind="numpy.ndarray", dims=(("x", 10, None),), dtype="float64")
         result = apply_binary(left, right, "add")
 
-        assert result.kind == "DataArray"  # From left
+        assert result.kind == "xarray.DataArray"  # From left

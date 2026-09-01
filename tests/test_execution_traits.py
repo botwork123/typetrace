@@ -201,11 +201,18 @@ def test_infer_by_execution_enforces_traits(case: str) -> None:
     def identity(arr):
         return arr
 
-    input_type = TypeDesc(kind="ndarray", dims={"x": 4, "y": 5}, dtype="float64")
+    input_type = TypeDesc(
+        kind="numpy.ndarray",
+        dims=(
+            ("x", 4, None),
+            ("y", 5, None),
+        ),
+        dtype="float64",
+    )
     expected = ExecutionTraits("float64", (4, 5), "cpu", "C", True, False)
     if case == "pass":
         result = infer_by_execution(identity, input_type, expected_output_traits=expected)
-        assert result.kind == "ndarray"
+        assert result.kind == "numpy.ndarray"
         assert result.dtype == "float64"
         return
     bad_target = ExecutionTraits("float32", (4, 5), "cpu", "C", True, False)
@@ -216,15 +223,15 @@ def test_infer_by_execution_enforces_traits(case: str) -> None:
 @pytest.mark.parametrize(
     "device,allow_device_copy,expected_dims,error",
     [
-        ("cpu", False, {"x": 4}, None),
+        ("cpu", False, (("dim0", 4, None),), None),
         ("cuda", False, None, "device mismatch not allowed"),
-        ("cuda", True, {"x": 4}, None),
+        ("cuda", True, (("dim0", 4, None),), None),
     ],
 )
 def test_cpu_gpu_policy_for_infer_by_execution(
     device: str,
     allow_device_copy: bool,
-    expected_dims: dict[str, int] | None,
+    expected_dims: tuple[tuple[str, int, None], ...] | None,
     error: str | None,
 ) -> None:
     pytest.importorskip("xarray")
@@ -232,7 +239,7 @@ def test_cpu_gpu_policy_for_infer_by_execution(
     def identity(arr):
         return arr
 
-    input_type = TypeDesc(kind="ndarray", dims={"x": 4}, dtype="float64")
+    input_type = TypeDesc(kind="numpy.ndarray", dims=(("x", 4, None),), dtype="float64")
     target = ExecutionTraits("float64", (4,), device, "C", True, False)
     if error is not None:
         with pytest.raises(ValueError, match=error):
