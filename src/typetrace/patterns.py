@@ -430,13 +430,56 @@ def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
     if left.kind == "scalar" and right.kind != "scalar":
         return _binary_impl(right, left, operation)
     if left.kind != right.kind and right.kind == "scalar":
+        if right.dtype is None:
+            raise TypeDescUnknownError("binary scalar dtype is unknown", path=("dtype",))
+        if left.dtype is not None:
+            return replace(left, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+        if left.dtypes is not None:
+            return replace(
+                left,
+                dtypes=tuple(
+                    (column, binary_result_dtype(dtype, right.dtype, operation))
+                    for column, dtype in left.dtypes
+                ),
+            )
+        if left.fields is not None:
+            return replace(
+                left,
+                fields=tuple(
+                    (field, _binary_impl(value, right, operation)) for field, value in left.fields
+                ),
+            )
+        raise TypeDescUnknownError("binary container dtype is unknown", path=("dtype",))
+    if left.dtype is None and left.dtypes is None and left.fields is None:
+        raise TypeDescUnknownError("binary operand dtype is unknown", path=("dtype",))
+    combined = _combine_type_desc(left, right, append_disjoint=False)
+    if left.dtype is not None or right.dtype is not None:
         if left.dtype is None or right.dtype is None:
             raise TypeDescUnknownError("binary operand dtype is unknown", path=("dtype",))
-        return replace(left, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
-    if left.dtype is None and right.dtype is None:
-        raise UnsupportedOperationError(f"binary {operation!r} requires an element dtype")
-    combined = _combine_type_desc(left, right, append_disjoint=False)
-    return replace(combined, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+        return replace(combined, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+    if left.dtypes is not None or right.dtypes is not None:
+        if left.dtypes is None or right.dtypes is None:
+            raise TypeDescUnknownError("binary column dtype is unknown", path=("dtypes",))
+        right_dtypes = dict(right.dtypes)
+        return replace(
+            combined,
+            dtypes=tuple(
+                (column, binary_result_dtype(dtype, right_dtypes[column], operation))
+                for column, dtype in left.dtypes
+            ),
+        )
+    if left.fields is not None or right.fields is not None:
+        if left.fields is None or right.fields is None:
+            raise TypeDescUnknownError("binary field type is unknown", path=("fields",))
+        right_fields = dict(right.fields)
+        return replace(
+            combined,
+            fields=tuple(
+                (field, _binary_impl(value, right_fields[field], operation))
+                for field, value in left.fields
+            ),
+        )
+    raise TypeDescUnknownError("binary operand type is unknown")
 
 
 def _binary_type_desc(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:

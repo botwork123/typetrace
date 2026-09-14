@@ -42,18 +42,67 @@ def test_binary_matrix_preserves_structure_and_sets_result_dtype(operation: str)
     )
 
 
-@pytest.mark.parametrize("kind", ["numpy.ndarray", "xarray.DataArray"])
-def test_binary_scalar_preserves_container_nominal_identity(kind: str) -> None:
-    container = TypeDesc(kind=kind, dims=(("x", 2, ("a", "b")),), dtype="float32")
+@pytest.mark.parametrize(
+    "container",
+    [
+        TypeDesc(kind="numpy.ndarray", dims=(("x", 2, ("a", "b")),), dtype="float32"),
+        TypeDesc(kind="xarray.DataArray", dims=(("x", 2, ("a", "b")),), dtype="float32"),
+        TypeDesc(
+            kind="pandas.DataFrame",
+            columns=("price", "volume"),
+            dtypes=(("price", "float32"), ("volume", "int64")),
+        ),
+        TypeDesc(
+            kind="pyarrow.Table",
+            columns=("price", "volume"),
+            dtypes=(("price", "float32"), ("volume", "int64")),
+        ),
+        TypeDesc(
+            kind="xarray.Dataset",
+            dims=(("x", 2, ("a", "b")),),
+            fields=(
+                (
+                    "price",
+                    TypeDesc(
+                        kind="xarray.DataArray", dims=(("x", 2, ("a", "b")),), dtype="float32"
+                    ),
+                ),
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("operation", ["add", "div", "eq"])
+def test_binary_scalar_preserves_container_nominal_identity(
+    container: TypeDesc, operation: str
+) -> None:
     scalar = TypeDesc(kind="scalar", dtype="int64")
 
-    result = container.binary(scalar, "add")
-    reverse = scalar.binary(container, "add")
+    result = container.binary(scalar, operation)
+    reverse = scalar.binary(container, operation)
 
     assert result == reverse
-    assert result.kind == kind
+    assert result.kind == container.kind
     assert result.dims == container.dims
-    assert result.dtype == "float32"
+    expected_dtype = "bool" if operation == "eq" else "float64" if operation == "div" else "float32"
+    if container.dtype is not None:
+        assert result.dtype == expected_dtype
+    elif container.dtypes is not None:
+        assert result.dtypes == (
+            ("price", expected_dtype),
+            (
+                "volume",
+                "float64" if operation == "div" else "bool" if operation == "eq" else "int64",
+            ),
+        )
+    else:
+        assert result.fields is not None
+        assert result.fields[0][1].dtype == expected_dtype
+
+
+def test_binary_rejects_unknown_container_dtype() -> None:
+    unknown = TypeDesc(kind="numpy.ndarray", shape=(2,))
+    with pytest.raises(TypeDescUnknownError):
+        unknown.binary(TypeDesc(kind="scalar", dtype="int64"), "add")
 
 
 @pytest.mark.parametrize("operation", ["neg", "pos", "invert", "abs"])
@@ -196,8 +245,12 @@ def test_symbolic_bind_and_invalid_operations() -> None:
 def test_full_operation_matrix_covers_dataset_and_opaque(td: TypeDesc) -> None:
     for operation in ["add", "sub", "mul", "div", "eq", "ne", "lt", "le", "gt", "ge"]:
         if td.dtype is None:
-            with pytest.raises(UnsupportedOperationError):
-                td.binary(td, operation)
+            expected_error = TypeDescUnknownError if td.kind == "opaque" else None
+            if expected_error is not None:
+                with pytest.raises(expected_error):
+                    td.binary(td, operation)
+            else:
+                assert td.binary(td, operation).kind == td.kind
         else:
             assert td.binary(td, operation).kind == td.kind
     for operation in ["neg", "pos", "invert", "abs"]:
