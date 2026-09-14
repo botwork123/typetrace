@@ -47,6 +47,11 @@ jobs:
         with:
           python-version: "3.10"
 
+      - name: Install DrJit LLVM backend runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-15
+
       - run: curl -LsSf https://astral.sh/uv/0.7.9/install.sh | sh
       - run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
