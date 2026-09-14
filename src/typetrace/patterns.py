@@ -358,7 +358,23 @@ def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
 # TypeDesc v2 pure structural algebra
 # =============================================================================
 
-_BINARY_OPERATIONS = frozenset({"add", "sub", "mul", "div", "eq", "ne", "lt", "le", "gt", "ge"})
+_BINARY_OPERATIONS = frozenset(
+    {
+        "add",
+        "sub",
+        "mul",
+        "div",
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "floordiv",
+        "mod",
+        "pow",
+    }
+)
 _UNARY_OPERATIONS = frozenset({"neg", "pos", "invert", "abs"})
 _REDUCE_OPERATIONS = frozenset({"sum", "mean", "min", "max", "count"})
 _METHOD_OPERATIONS = _REDUCE_OPERATIONS | {"astype"}
@@ -411,23 +427,106 @@ def _merge_equal_payload(left: TypeDesc, right: TypeDesc, field: str) -> object:
     return left_value
 
 
-def _combine_type_desc(left: TypeDesc, right: TypeDesc, *, append_disjoint: bool) -> TypeDesc:
+def _combine_type_desc(
+    left: TypeDesc,
+    right: TypeDesc,
+    *,
+    append_disjoint: bool,
+    equal_payload_fields: tuple[str, ...] = (
+        "shape",
+        "columns",
+        "dtypes",
+        "fields",
+        "drjit_type",
+        "static_dims",
+    ),
+) -> TypeDesc:
     if left.kind != right.kind:
         raise TypeDescConflictError("nominal kinds differ", path=("kind",))
     if left.metadata != right.metadata:
         raise TypeDescConflictError("metadata differs", path=("metadata",))
     dims = _merge_dims(left.dims, right.dims, append_disjoint=append_disjoint)
     index = _merge_dims(left.index, right.index, append_disjoint=append_disjoint)
-    for field in ("shape", "columns", "dtypes", "fields", "drjit_type", "static_dims"):
+    for field in equal_payload_fields:
         _merge_equal_payload(left, right, field)
     return replace(left, dims=dims, index=index)
 
 
 def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
-    if left.dtype is None and right.dtype is None:
-        raise UnsupportedOperationError(f"binary {operation!r} requires an element dtype")
-    combined = _combine_type_desc(left, right, append_disjoint=False)
-    return replace(combined, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+    # A scalar is broadcastable over every typed container.  Keep the
+    # container's nominal backend identity; only the element dtype changes.
+    # Two non-scalar kinds remain nominally incompatible.
+    if left.kind == "scalar" and right.kind != "scalar":
+        return _binary_impl(right, left, operation)
+    if left.kind != right.kind and right.kind == "scalar":
+        if right.dtype is None:
+            raise TypeDescUnknownError("binary scalar dtype is unknown", path=("dtype",))
+        if left.dtype is not None:
+            return replace(left, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+        if left.dtypes is not None:
+            return replace(
+                left,
+                dtypes=tuple(
+                    (column, cast(str, binary_result_dtype(dtype, right.dtype, operation)))
+                    for column, dtype in left.dtypes
+                ),
+            )
+        if left.fields is not None:
+            return replace(
+                left,
+                fields=tuple(
+                    (field, _binary_impl(value, right, operation)) for field, value in left.fields
+                ),
+            )
+        raise TypeDescUnknownError("binary container dtype is unknown", path=("dtype",))
+    if left.dtype is None and left.dtypes is None and left.fields is None:
+        raise TypeDescUnknownError("binary operand dtype is unknown", path=("dtype",))
+    if left.dtypes is not None or right.dtypes is not None:
+        if left.dtypes is None or right.dtypes is None:
+            raise TypeDescUnknownError("binary column dtype is unknown", path=("dtypes",))
+        if tuple(column for column, _ in left.dtypes) != tuple(
+            column for column, _ in right.dtypes
+        ):
+            raise TypeDescConflictError("columns differ", path=("columns",))
+    if left.fields is not None or right.fields is not None:
+        if left.fields is None or right.fields is None:
+            raise TypeDescUnknownError("binary field type is unknown", path=("fields",))
+        if tuple(field for field, _ in left.fields) != tuple(field for field, _ in right.fields):
+            raise TypeDescConflictError("fields differ", path=("fields",))
+    combined = _combine_type_desc(
+        left,
+        right,
+        append_disjoint=False,
+        equal_payload_fields=("shape", "columns", "drjit_type", "static_dims"),
+    )
+    if left.dtype is not None or right.dtype is not None:
+        if left.dtype is None or right.dtype is None:
+            raise TypeDescUnknownError("binary operand dtype is unknown", path=("dtype",))
+        return replace(combined, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
+    if left.dtypes is not None:
+        assert right.dtypes is not None
+        right_dtypes = dict(right.dtypes)
+        return replace(
+            combined,
+            dtypes=tuple(
+                (
+                    column,
+                    cast(str, binary_result_dtype(dtype, right_dtypes[column], operation)),
+                )
+                for column, dtype in left.dtypes
+            ),
+        )
+    if left.fields is not None:
+        assert right.fields is not None
+        right_fields = dict(right.fields)
+        return replace(
+            combined,
+            fields=tuple(
+                (field, _binary_impl(value, right_fields[field], operation))
+                for field, value in left.fields
+            ),
+        )
+    raise TypeDescUnknownError("binary operand type is unknown")
 
 
 def _binary_type_desc(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:

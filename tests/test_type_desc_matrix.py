@@ -220,6 +220,13 @@ def test_scalar_binary_and_reduction() -> None:
     assert td.reduce(("id",), "sum").dims == (("x", 3, ("a", "b", "c")),)
 
 
+@pytest.mark.parametrize("operation", ["floordiv", "mod", "pow"])
+def test_array_binary_operations_preserve_structure(operation: str) -> None:
+    value = TypeDesc("numpy.ndarray", dims=(("instrument", 2),), dtype="float64")
+    result = value.binary(TypeDesc("scalar", dtype="int64"), operation)
+    assert result.dims == value.dims
+
+
 def test_broadcast_bind_and_conflict() -> None:
     left = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("col", 3, None)), dtype="float64")
     right = TypeDesc("numpy.ndarray", dims=(("row", 2, None), ("col", 3, None)), dtype="float64")
