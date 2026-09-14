@@ -438,7 +438,7 @@ def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
             return replace(
                 left,
                 dtypes=tuple(
-                    (column, binary_result_dtype(dtype, right.dtype, operation))
+                    (column, cast(str, binary_result_dtype(dtype, right.dtype, operation)))
                     for column, dtype in left.dtypes
                 ),
             )
@@ -464,7 +464,10 @@ def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
         return replace(
             combined,
             dtypes=tuple(
-                (column, binary_result_dtype(dtype, right_dtypes[column], operation))
+                (
+                    column,
+                    cast(str, binary_result_dtype(dtype, right_dtypes[column], operation)),
+                )
                 for column, dtype in left.dtypes
             ),
         )
