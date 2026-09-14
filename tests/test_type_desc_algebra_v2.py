@@ -105,6 +105,38 @@ def test_binary_rejects_unknown_container_dtype() -> None:
         unknown.binary(TypeDesc(kind="scalar", dtype="int64"), "add")
 
 
+def test_binary_promotes_each_known_column_dtype() -> None:
+    left = TypeDesc(
+        kind="pandas.DataFrame",
+        columns=("price", "volume"),
+        dtypes=(("price", "float32"), ("volume", "int64")),
+    )
+    right = TypeDesc(
+        kind="pandas.DataFrame",
+        columns=("price", "volume"),
+        dtypes=(("price", "float64"), ("volume", "int32")),
+    )
+
+    result = left.binary(right, "add")
+    assert result.dtypes == (("price", "float64"), ("volume", "int64"))
+
+
+def test_binary_promotes_matching_nested_field_types() -> None:
+    left = TypeDesc(kind="record", fields=(("price", TypeDesc(kind="scalar", dtype="float32")),))
+    right = TypeDesc(kind="record", fields=(("price", TypeDesc(kind="scalar", dtype="float64")),))
+
+    result = left.binary(right, "add")
+    assert result.fields == (("price", TypeDesc(kind="scalar", dtype="float64")),)
+
+
+def test_binary_rejects_unknown_nested_field_type() -> None:
+    left = TypeDesc(kind="record", fields=(("price", TypeDesc(kind="opaque")),))
+    right = TypeDesc(kind="record", fields=(("price", TypeDesc(kind="scalar", dtype="float64")),))
+
+    with pytest.raises(TypeDescUnknownError):
+        left.binary(right, "add")
+
+
 @pytest.mark.parametrize("operation", ["neg", "pos", "invert", "abs"])
 def test_unary_matrix_preserves_all_unrelated_payloads(operation: str) -> None:
     result = array().unary(operation)
