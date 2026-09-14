@@ -358,7 +358,23 @@ def apply_binary(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
 # TypeDesc v2 pure structural algebra
 # =============================================================================
 
-_BINARY_OPERATIONS = frozenset({"add", "sub", "mul", "div", "eq", "ne", "lt", "le", "gt", "ge"})
+_BINARY_OPERATIONS = frozenset(
+    {
+        "add",
+        "sub",
+        "mul",
+        "div",
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "floordiv",
+        "mod",
+        "pow",
+    }
+)
 _UNARY_OPERATIONS = frozenset({"neg", "pos", "invert", "abs"})
 _REDUCE_OPERATIONS = frozenset({"sum", "mean", "min", "max", "count"})
 _METHOD_OPERATIONS = _REDUCE_OPERATIONS | {"astype"}
