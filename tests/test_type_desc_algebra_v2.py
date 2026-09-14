@@ -42,6 +42,20 @@ def test_binary_matrix_preserves_structure_and_sets_result_dtype(operation: str)
     )
 
 
+@pytest.mark.parametrize("kind", ["numpy.ndarray", "xarray.DataArray"])
+def test_binary_scalar_preserves_container_nominal_identity(kind: str) -> None:
+    container = TypeDesc(kind=kind, dims=(("x", 2, ("a", "b")),), dtype="float32")
+    scalar = TypeDesc(kind="scalar", dtype="int64")
+
+    result = container.binary(scalar, "add")
+    reverse = scalar.binary(container, "add")
+
+    assert result == reverse
+    assert result.kind == kind
+    assert result.dims == container.dims
+    assert result.dtype == "float32"
+
+
 @pytest.mark.parametrize("operation", ["neg", "pos", "invert", "abs"])
 def test_unary_matrix_preserves_all_unrelated_payloads(operation: str) -> None:
     result = array().unary(operation)

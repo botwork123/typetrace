@@ -424,6 +424,15 @@ def _combine_type_desc(left: TypeDesc, right: TypeDesc, *, append_disjoint: bool
 
 
 def _binary_impl(left: TypeDesc, right: TypeDesc, operation: str) -> TypeDesc:
+    # A scalar is broadcastable over every typed container.  Keep the
+    # container's nominal backend identity; only the element dtype changes.
+    # Two non-scalar kinds remain nominally incompatible.
+    if left.kind == "scalar" and right.kind != "scalar":
+        return _binary_impl(right, left, operation)
+    if left.kind != right.kind and right.kind == "scalar":
+        if left.dtype is None or right.dtype is None:
+            raise TypeDescUnknownError("binary operand dtype is unknown", path=("dtype",))
+        return replace(left, dtype=binary_result_dtype(left.dtype, right.dtype, operation))
     if left.dtype is None and right.dtype is None:
         raise UnsupportedOperationError(f"binary {operation!r} requires an element dtype")
     combined = _combine_type_desc(left, right, append_disjoint=False)
