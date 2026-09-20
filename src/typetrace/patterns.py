@@ -141,38 +141,119 @@ def reduce_dim(d: Dims | None, name: str) -> Dims:
     )
 
 
+_DTYPE_ALIASES = {
+    "boolean": "bool",
+    "Boolean": "bool",
+    "double": "float64",
+    **{f"Int{bits}": f"int{bits}" for bits in (8, 16, 32, 64)},
+    **{f"UInt{bits}": f"uint{bits}" for bits in (8, 16, 32, 64)},
+    **{f"Float{bits}": f"float{bits}" for bits in (16, 32, 64)},
+    **{f"Complex{bits}": f"complex{bits}" for bits in (64, 128)},
+}
+_CANONICAL_DTYPES = frozenset(
+    {
+        "bool",
+        *(f"int{bits}" for bits in (8, 16, 32, 64)),
+        *(f"uint{bits}" for bits in (8, 16, 32, 64)),
+        *(f"float{bits}" for bits in (16, 32, 64)),
+        "complex64",
+        "complex128",
+    }
+)
+_SIGNED_DTYPES = frozenset(f"int{bits}" for bits in (8, 16, 32, 64))
+_UNSIGNED_DTYPES = frozenset(f"uint{bits}" for bits in (8, 16, 32, 64))
+_FLOAT_DTYPES = frozenset(f"float{bits}" for bits in (16, 32, 64))
+_COMPLEX_DTYPES = frozenset({"complex64", "complex128"})
+
+
+def _normalize_dtype(dtype: str | None, path: tuple[str, ...]) -> str | None:
+    if dtype is None:
+        return None
+    if not isinstance(dtype, str) or not dtype:
+        raise TypeDescUnknownError(f"unknown dtype {dtype!r}", path=path)
+    normalized = _DTYPE_ALIASES.get(dtype, dtype)
+    if normalized not in _CANONICAL_DTYPES:
+        raise TypeDescUnknownError(f"unknown dtype {dtype!r}", path=path)
+    return normalized
+
+
+def _integer_width(dtype: str) -> int:
+    return int(dtype.removeprefix("int").removeprefix("uint"))
+
+
+def _promote_integer_pair(dtype1: str, dtype2: str) -> str:
+    if dtype1 in _SIGNED_DTYPES and dtype2 in _SIGNED_DTYPES:
+        return f"int{max(_integer_width(dtype1), _integer_width(dtype2))}"
+    if dtype1 in _UNSIGNED_DTYPES and dtype2 in _UNSIGNED_DTYPES:
+        return f"uint{max(_integer_width(dtype1), _integer_width(dtype2))}"
+    signed = dtype1 if dtype1 in _SIGNED_DTYPES else dtype2
+    unsigned = dtype2 if signed == dtype1 else dtype1
+    signed_width = _integer_width(signed)
+    unsigned_width = _integer_width(unsigned)
+    signed_unsigned = {
+        (8, 8): "int16",
+        (8, 16): "int32",
+        (8, 32): "int64",
+        (8, 64): "float64",
+        (16, 8): "int16",
+        (16, 16): "int32",
+        (16, 32): "int64",
+        (16, 64): "float64",
+        (32, 8): "int32",
+        (32, 16): "int32",
+        (32, 32): "int64",
+        (32, 64): "float64",
+        (64, 8): "int64",
+        (64, 16): "int64",
+        (64, 32): "int64",
+        (64, 64): "float64",
+    }
+    return signed_unsigned[(signed_width, unsigned_width)]
+
+
 def promote_dtype(dtype1: str | None, dtype2: str | None) -> str | None:
-    """
-    Promote two dtypes to their common supertype.
-
-    Simple promotion rules (can be extended):
-    - float64 wins over float32
-    - float wins over int
-    - Same type returns same
-
-    Args:
-        dtype1: First dtype
-        dtype2: Second dtype
-
-    Returns:
-        Promoted dtype
-    """
-    if dtype1 is None:
-        return dtype2
-    if dtype2 is None:
-        return dtype1
-    if dtype1 == dtype2:
-        return dtype1
-
-    # Simple promotion hierarchy
-    hierarchy = ["bool", "int32", "int64", "float32", "float64"]
-    try:
-        idx1 = hierarchy.index(dtype1)
-        idx2 = hierarchy.index(dtype2)
-        return hierarchy[max(idx1, idx2)]
-    except ValueError:
-        # Unknown dtype, return first
-        return dtype1
+    """Return the canonical, symmetric common dtype for two operands."""
+    normalized1 = _normalize_dtype(dtype1, ("dtype1",))
+    normalized2 = _normalize_dtype(dtype2, ("dtype2",))
+    if normalized1 is None:
+        return normalized2
+    if normalized2 is None:
+        return normalized1
+    if normalized1 == normalized2:
+        return normalized1
+    if normalized1 == "bool":
+        return normalized2
+    if normalized2 == "bool":
+        return normalized1
+    if (
+        normalized1 in _SIGNED_DTYPES | _UNSIGNED_DTYPES
+        and normalized2 in _SIGNED_DTYPES | _UNSIGNED_DTYPES
+    ):
+        return _promote_integer_pair(normalized1, normalized2)
+    if normalized1 in _FLOAT_DTYPES and normalized2 in _FLOAT_DTYPES:
+        return f"float{max(int(normalized1[5:]), int(normalized2[5:]))}"
+    if normalized1 in _COMPLEX_DTYPES and normalized2 in _COMPLEX_DTYPES:
+        return "complex128" if "complex128" in (normalized1, normalized2) else "complex64"
+    if (normalized1 in _SIGNED_DTYPES | _UNSIGNED_DTYPES and normalized2 in _FLOAT_DTYPES) or (
+        normalized2 in _SIGNED_DTYPES | _UNSIGNED_DTYPES and normalized1 in _FLOAT_DTYPES
+    ):
+        return "float64"
+    if (
+        normalized1 in _SIGNED_DTYPES | _UNSIGNED_DTYPES
+        or normalized2 in _SIGNED_DTYPES | _UNSIGNED_DTYPES
+    ):
+        integer = normalized1 if normalized1 in _SIGNED_DTYPES | _UNSIGNED_DTYPES else normalized2
+        other = normalized2 if integer == normalized1 else normalized1
+        if other == "complex64":
+            return "complex64" if _integer_width(integer) <= 32 else "complex128"
+        return "complex128"
+    if normalized1 in _FLOAT_DTYPES or normalized2 in _FLOAT_DTYPES:
+        floating = normalized1 if normalized1 in _FLOAT_DTYPES else normalized2
+        other = normalized2 if floating == normalized1 else normalized1
+        if other == "complex64":
+            return "complex64" if floating in {"float16", "float32"} else "complex128"
+        return "complex128"
+    raise TypeDescUnknownError("unable to promote dtypes", path=("dtype1", "dtype2"))
 
 
 def bind_symbols(d: Dims | None, bindings: dict[str, int]) -> Dims:
@@ -239,6 +320,31 @@ _FLOAT_RESULT_OPS = frozenset({"truediv", "div", "/"})
 
 # Floor division returns int
 _INT_RESULT_OPS_BINARY = frozenset({"floordiv", "//"})
+_BINARY_HELPER_OPERATIONS = (
+    {
+        "add",
+        "sub",
+        "mul",
+        "div",
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+    }
+    | _COMPARISON_OPS
+    | _FLOAT_RESULT_OPS
+    | _INT_RESULT_OPS_BINARY
+    | {"mod", "pow"}
+)
+_UNARY_HELPER_OPERATIONS = (
+    {"neg", "pos", "invert", "abs"}
+    | _BOOL_RESULT_OPS
+    | _COMPLEX_TO_REAL_OPS
+    | _INT_RESULT_OPS
+    | {"exp", "log", "sqrt"}
+)
 
 
 def binary_result_dtype(
@@ -263,6 +369,11 @@ def binary_result_dtype(
     Returns:
         Result dtype
     """
+    if operation not in _BINARY_HELPER_OPERATIONS:
+        raise UnsupportedOperationError(f"unsupported binary operation {operation!r}")
+    left = _normalize_dtype(left_dtype, ("dtype1",))
+    right = _normalize_dtype(right_dtype, ("dtype2",))
+
     if operation in _COMPARISON_OPS:
         return "bool"
 
@@ -274,7 +385,7 @@ def binary_result_dtype(
         return "int64"
 
     # Default: promote both operand types
-    return promote_dtype(left_dtype, right_dtype)
+    return promote_dtype(left, right)
 
 
 def unary_result_dtype(input_dtype: str | None, operation: str) -> str | None:
@@ -294,6 +405,10 @@ def unary_result_dtype(input_dtype: str | None, operation: str) -> str | None:
     Returns:
         Result dtype
     """
+    if operation not in _UNARY_HELPER_OPERATIONS:
+        raise UnsupportedOperationError(f"unsupported unary operation {operation!r}")
+    normalized = _normalize_dtype(input_dtype, ("input_dtype",))
+
     if operation in _BOOL_RESULT_OPS:
         return "bool"
 
@@ -301,12 +416,12 @@ def unary_result_dtype(input_dtype: str | None, operation: str) -> str | None:
         return "int64"
 
     if operation in _COMPLEX_TO_REAL_OPS:
-        if input_dtype and "complex" in input_dtype:
+        if normalized and normalized in _COMPLEX_DTYPES:
             # complex64 → float32, complex128 → float64
-            return "float32" if input_dtype == "complex64" else "float64"
+            return "float32" if normalized == "complex64" else "float64"
 
     # Default: preserve dtype
-    return input_dtype
+    return normalized
 
 
 # =============================================================================

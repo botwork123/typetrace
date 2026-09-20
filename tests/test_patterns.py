@@ -125,7 +125,7 @@ class TestPromoteDtype:
         [
             ("float64", "float64", "float64"),
             ("float32", "float64", "float64"),
-            ("int32", "float32", "float32"),
+            ("int32", "float32", "float64"),
             ("int32", "int64", "int64"),
             ("bool", "int32", "int32"),
             (None, "float64", "float64"),
@@ -196,7 +196,7 @@ class TestBinaryResultDtype:
             # Arithmetic ops → promoted dtype
             ("float64", "float64", "add", "float64"),
             ("float32", "float64", "add", "float64"),
-            ("int32", "float32", "mul", "float32"),
+            ("int32", "float32", "mul", "float64"),
             ("int32", "int64", "sub", "int64"),
             ("float64", "float64", "pow", "float64"),
             ("float64", "float64", "mod", "float64"),

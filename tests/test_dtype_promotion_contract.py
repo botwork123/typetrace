@@ -8,7 +8,6 @@ from typetrace import TypeDesc
 from typetrace.core import TypeDescUnknownError, UnsupportedOperationError
 from typetrace.patterns import binary_result_dtype, promote_dtype, unary_result_dtype
 
-
 SIGNED_UNSIGNED_MATRIX = [
     ("int8", "uint8", "int16"),
     ("int8", "uint16", "int32"),
@@ -54,9 +53,7 @@ def test_promote_dtype_complete_lattice(left: str, right: str, expected: str) ->
         ("complex128", "float64", "complex128"),
     ],
 )
-def test_promote_dtype_cross_family_matrix(
-    left: str, right: str, expected: str
-) -> None:
+def test_promote_dtype_cross_family_matrix(left: str, right: str, expected: str) -> None:
     assert promote_dtype(left, right) == expected
     assert promote_dtype(right, left) == expected
 
@@ -79,9 +76,7 @@ def test_promote_dtype_cross_family_matrix(
         ("bool", "complex128", "complex128"),
     ],
 )
-def test_promote_dtype_bool_with_every_numeric_family(
-    left: str, right: str, expected: str
-) -> None:
+def test_promote_dtype_bool_with_every_numeric_family(left: str, right: str, expected: str) -> None:
     assert promote_dtype(left, right) == expected
     assert promote_dtype(right, left) == expected
 
@@ -107,9 +102,7 @@ def test_promote_dtype_bool_with_every_numeric_family(
         ("uint64", "complex128", "complex128"),
     ],
 )
-def test_promote_dtype_integer_complex_matrix(
-    integer: str, complex: str, expected: str
-) -> None:
+def test_promote_dtype_integer_complex_matrix(integer: str, complex: str, expected: str) -> None:
     assert promote_dtype(integer, complex) == expected
     assert promote_dtype(complex, integer) == expected
 
@@ -148,9 +141,7 @@ def test_promote_dtype_every_integer_float_pair(integer: str, floating: str) -> 
         ("complex64", "complex128", "complex128"),
     ],
 )
-def test_promote_dtype_same_family_widening(
-    left: str, right: str, expected: str
-) -> None:
+def test_promote_dtype_same_family_widening(left: str, right: str, expected: str) -> None:
     assert promote_dtype(left, right) == expected
     assert promote_dtype(right, left) == expected
 
@@ -235,9 +226,22 @@ def test_promote_dtype_normalizes_every_declared_alias(alias: str, canonical: st
 
 def test_declared_alias_matrix_has_unique_rows() -> None:
     aliases = (
-        "boolean", "Boolean", "Int8", "Int16", "Int32", "Int64",
-        "UInt8", "UInt16", "UInt32", "UInt64", "Float16", "Float32",
-        "Float64", "double", "Complex64", "Complex128",
+        "boolean",
+        "Boolean",
+        "Int8",
+        "Int16",
+        "Int32",
+        "Int64",
+        "UInt8",
+        "UInt16",
+        "UInt32",
+        "UInt64",
+        "Float16",
+        "Float32",
+        "Float64",
+        "double",
+        "Complex64",
+        "Complex128",
     )
     assert len(aliases) == len(set(aliases)) == 16
 
@@ -343,8 +347,23 @@ def test_binary_result_dtype_has_total_none_and_alias_matrix(
 
 
 CONSTANT_BINARY_OPERATIONS = [
-    "eq", "ne", "lt", "le", "gt", "ge", "==", "!=", "<", "<=", ">", ">=",
-    "div", "truediv", "/", "floordiv", "//",
+    "eq",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "==",
+    "!=",
+    "<",
+    "<=",
+    ">",
+    ">=",
+    "div",
+    "truediv",
+    "/",
+    "floordiv",
+    "//",
 ]
 
 
@@ -359,12 +378,6 @@ CONSTANT_BINARY_OPERATIONS = [
 def test_binary_result_dtype_constant_operations_validate_both_operands(
     operation: str, bad_left: str, bad_right: str
 ) -> None:
-    with pytest.raises(TypeDescUnknownError) as left_error:
-        binary_result_dtype(bad_left, "float32", operation)
-    assert left_error.value.path == ("dtype1",)
-    with pytest.raises(TypeDescUnknownError) as right_error:
-        binary_result_dtype("float32", bad_right, operation)
-    assert right_error.value.path == ("dtype2",)
     for bad in ("unknown_dtype", ""):
         with pytest.raises(TypeDescUnknownError) as left_error:
             binary_result_dtype(bad, "float32", operation)
@@ -417,12 +430,6 @@ def test_binary_result_dtype_none_generic_operations(operation: str) -> None:
 def test_binary_result_dtype_generic_operations_validate_both_operands(
     operation: str, bad_left: str, bad_right: str
 ) -> None:
-    with pytest.raises(TypeDescUnknownError) as left_error:
-        binary_result_dtype(bad_left, "float32", operation)
-    assert left_error.value.path == ("dtype1",)
-    with pytest.raises(TypeDescUnknownError) as right_error:
-        binary_result_dtype("float32", bad_right, operation)
-    assert right_error.value.path == ("dtype2",)
     for bad in ("unknown_dtype", ""):
         with pytest.raises(TypeDescUnknownError) as left_error:
             binary_result_dtype(bad, "float32", operation)
@@ -550,9 +557,7 @@ def test_unary_result_dtype_none_preserves_unknown_value(operation: str) -> None
     assert unary_result_dtype(None, operation) is None
 
 
-@pytest.mark.parametrize(
-    "operation", ["not", "isnan", "isinf", "isfinite"]
-)
+@pytest.mark.parametrize("operation", ["not", "isnan", "isinf", "isfinite"])
 def test_unary_result_dtype_none_predicates(operation: str) -> None:
     assert unary_result_dtype(None, operation) == "bool"
 
