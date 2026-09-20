@@ -179,11 +179,9 @@ def test_series_and_array_forms(kind: str) -> None:
 
 
 def test_drjit_form_when_llvm_is_available() -> None:
-    import drjit
-
-    assert drjit.has_backend(drjit.JitBackend.LLVM), (
-        "DrJit LLVM is required by the test environment"
-    )
+    drjit = pytest.importorskip("drjit")
+    if not drjit.has_backend(drjit.JitBackend.LLVM):
+        pytest.skip("DrJit LLVM backend unavailable")
     from drjit import llvm
 
     desc = TypeDesc.from_value(llvm.Float64([1.0, 2.0]))
@@ -192,11 +190,9 @@ def test_drjit_form_when_llvm_is_available() -> None:
 
 
 def test_drjit_shape_bind_when_llvm_is_available() -> None:
-    import drjit
-
-    assert drjit.has_backend(drjit.JitBackend.LLVM), (
-        "DrJit LLVM is required by the test environment"
-    )
+    drjit = pytest.importorskip("drjit")
+    if not drjit.has_backend(drjit.JitBackend.LLVM):
+        pytest.skip("DrJit LLVM backend unavailable")
     expected = TypeDesc("drjit.Array", shape=(2, 3), dtype="float64")
     assert (
         TypeDesc("drjit.Array", shape=(Symbol("N"), 3), dtype="float64").bind({"N": 2}) == expected
